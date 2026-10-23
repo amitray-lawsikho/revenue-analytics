@@ -123,7 +123,9 @@ def load_sa_info(raw: str) -> dict:
             continue
         if isinstance(info, dict) and info.get("client_email") and info.get("private_key"):
             return info
-    shape = f"length {len(s)}, starts with {'{' if s.startswith('{') else repr(s[:1]) if s[:1] in '\"[' else 'a letter/number'}"
+    first = s[:1]
+    kind = "{" if first == "{" else (repr(first) if first in ('"', "[") else "a letter/number")
+    shape = f"length {len(s)}, starts with {kind}"
     raise RuntimeError(f"BQ_CREDENTIALS is not a service-account JSON key ({shape}). Paste the whole .json file, "
                        "from the first {{ to the last }}.")
 
