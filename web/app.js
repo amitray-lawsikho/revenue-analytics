@@ -33,9 +33,7 @@ function preset(p) {
     case "week": { const dow = (d.getUTCDay() + 6) % 7; return [addDays(t, -dow), t, "day"]; }
     case "month": return [monthStart, t, "day"];
     case "lastmonth": { const e = addDays(monthStart, -1); return [e.slice(0, 8) + "01", e, "week"]; }
-    case "fy": return [fyStart(t), t, "month"];
     case "all": return ["2023-04-01", t, "fy"];
-    case "lastfy": { const s = fyStart(t); const ps = (+s.slice(0, 4) - 1) + "-04-01"; return [ps, addDays(s, -1), "month"]; }
   }
 }
 function periodLabel(p, grain) {
@@ -99,6 +97,7 @@ async function load() {
   $("trend-note").textContent = note;
   const len = daysBetween(from, to);
   const pTo = addDays(from, -1), pFrom = addDays(from, -len);
+  S.pFrom = pFrom; S.pTo = pTo;
   try {
     [S.rows, S.prev] = await Promise.all([
       rpcAll("get_perf", { p_from: from, p_to: to, p_grain: grain }),
@@ -127,16 +126,30 @@ function renderCompare() {
     const vals = periods.map((p) => sum(byP.get(p) || [])[m]);
     return { k, vals, total: vals.reduce((a, b) => a + b, 0) };
   }).sort((a, b) => b.total - a.total);
-  const palette = [css("--c1"), css("--c2"), css("--c3"), "#9c36b5", "#2f9e44", "#e03131", "#1098ad", "#f08c00", "#5c7cfa", "#868e96"];
-  const shown = groups.slice(0, 10);
+  const prevBy = groupBy(filtered(S.prev), key);
+  const names = [...new Set([...groups.map((g) => g.k), ...prevBy.keys()])];
+  const bars = names.map((k) => {
+    const cur = groups.find((g) => g.k === k)?.total || 0, prev = sum(prevBy.get(k) || [])[m];
+    return { k, cur, prev, ch: prev ? (cur - prev) / Math.abs(prev) : null };
+  }).sort((a, b) => b.cur - a.cur).slice(0, 15);
+  const short = (s) => D(s).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
+  const what = m === "revenue" ? "Revenue" : "New enrolments";
+  $("cmp-sub").textContent = `${what}: ${short(S.from)} – ${short(S.to)} compared with ${short(S.pFrom)} – ${short(S.pTo)}`;
+  $("cmp-box").style.height = Math.max(220, 70 + bars.length * 52) + "px";
+  const chTxt = (b) => b.ch == null ? "new" : `${b.ch >= 0 ? "▲" : "▼"} ${Math.abs(b.ch * 100).toFixed(1)}%`;
   chart("cmp-chart", {
-    type: periods.length > 1 ? "line" : "bar",
-    data: { labels: periods.map((p) => periodLabel(p, S.grain)),
-      datasets: shown.map((g, i) => ({ label: g.k, data: g.vals, borderColor: palette[i % palette.length],
-        backgroundColor: palette[i % palette.length], tension: 0.25, pointRadius: 3, borderRadius: 4 })) },
-    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${fmt(c.raw)}` } } },
-      scales: { y: { beginAtZero: true, ticks: { callback: (v) => fmt(v) }, grid: { color: css("--line") } }, x: { grid: { display: false } } } },
+    type: "bar",
+    data: { labels: bars.map((b) => [b.k, chTxt(b)]),
+      datasets: [
+        { label: `Previous (${short(S.pFrom)} – ${short(S.pTo)})`, data: bars.map((b) => b.prev), backgroundColor: css("--line"), borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.75 },
+        { label: `Selected (${short(S.from)} – ${short(S.to)})`, data: bars.map((b) => b.cur), backgroundColor: css("--c1"), borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.75 },
+      ] },
+    options: { indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom" },
+        tooltip: { callbacks: { label: (c) => ` ${c.dataset.label.split(" (")[0]}: ${fmt(c.raw)}`,
+          afterBody: (items) => { const b = bars[items[0].dataIndex]; return b.ch == null ? "No data in the previous period" : `Change: ${chTxt(b)}`; } } } },
+      scales: { x: { beginAtZero: true, ticks: { callback: (v) => fmt(v) }, grid: { color: css("--line") } },
+        y: { grid: { display: false }, ticks: { color: (c) => { const b = bars[c.index]; return b && b.ch != null && b.ch < 0 ? css("--bad") : css("--ink"); }, font: { weight: "600" } } } } },
   });
   const tot = periods.map((_, i) => groups.reduce((a, g) => a + g.vals[i], 0));
   const change = (v) => { const n = v.length; if (n < 2 || !v[n - 2]) return "–";
@@ -282,9 +295,19 @@ function fillFilters() {
   opts($("f-team"), "All teams", teams.map((x) => [x, x]), teams.includes(t) ? t : "");
   opts($("f-person"), "All counsellors", people.map((x) => [x.email, x.name]), people.some((x) => x.email === p) ? p : "");
 }
+function fillFy() {
+  const cur = +fyStart(istToday()).slice(0, 4);
+  for (let y = cur; y >= 2023; y--) $("fy").insertAdjacentHTML("beforeend", `<option value="${y}">FY ${y}-${String(y + 1).slice(2)}</option>`);
+}
+function setFy(y) {
+  const t = istToday(), end = `${+y + 1}-03-31`;
+  $("from").value = `${y}-04-01`; $("to").value = end < t ? end : t; $("grain").value = "month";
+  document.querySelectorAll("#presets button").forEach((b) => b.classList.remove("on"));
+  load();
+}
 function setPreset(p) {
   const [f, t, g] = preset(p);
-  $("from").value = f; $("to").value = t; $("grain").value = g;
+  $("from").value = f; $("to").value = t; $("grain").value = g; $("fy").value = "";
   document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === p));
   load();
 }
@@ -326,6 +349,7 @@ async function start() {
     return;
   }
   $("auth").hidden = true; $("app").hidden = false;
+  fillFy();
   await loadMeta();
   setPreset("month");
 }
@@ -347,6 +371,8 @@ $("signout").addEventListener("click", async () => { await sb.auth.signOut(); lo
 
 /* ---------- events ---------- */
 document.querySelectorAll("#presets button").forEach((b) => b.addEventListener("click", () => setPreset(b.dataset.p)));
+$("fy").addEventListener("change", (e) => { if (e.target.value) setFy(e.target.value); });
+["from", "to"].forEach((id) => $(id).addEventListener("change", () => { $("fy").value = ""; }));
 ["from", "to", "grain"].forEach((id) => $(id).addEventListener("change", () => {
   document.querySelectorAll("#presets button").forEach((b) => b.classList.remove("on")); load(); }));
 ["f-vertical", "f-team", "f-person"].forEach((id) => $(id).addEventListener("change", () => { fillFilters(); render(); }));

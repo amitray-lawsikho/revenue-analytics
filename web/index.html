@@ -42,10 +42,10 @@
       <div class="seg" id="presets">
         <button data-p="today">Today</button><button data-p="yesterday">Yesterday</button>
         <button data-p="week">This week</button><button data-p="month" class="on">This month</button>
-        <button data-p="lastmonth">Last month</button><button data-p="fy">This FY</button>
-        <button data-p="lastfy">Last FY</button><button data-p="all">All years</button>
+        <button data-p="lastmonth">Last month</button><button data-p="all">All years</button>
       </div>
       <div class="filter-row">
+        <label>Financial year <select id="fy"><option value="">Custom dates</option></select></label>
         <label>From <input type="date" id="from"></label>
         <label>To <input type="date" id="to"></label>
         <label>View by
@@ -74,15 +74,15 @@
 
       <section class="card">
         <div class="card-h">
-          <h2>Revenue comparison</h2>
+          <div><h2>Revenue comparison</h2><p class="muted small" id="cmp-sub" style="margin:2px 0 0"></p></div>
           <div class="cmp-ctl">
             <div class="seg sm" id="cmp-level"><button data-l="vertical" class="on">Verticals</button><button data-l="team">Teams</button></div>
             <div class="seg sm" id="cmp-metric"><button data-m="revenue" class="on">Revenue</button><button data-m="new_enrolments">New enrolments</button></div>
           </div>
         </div>
-        <div class="chart-box"><canvas id="cmp-chart"></canvas></div>
+        <div class="chart-box" id="cmp-box"><canvas id="cmp-chart"></canvas></div>
         <div class="table-wrap"><table id="cmp-table"></table></div>
-        <p class="muted small">One column per period of the "View by" choice. "Change" compares the last two periods shown; the last period may still be in progress.</p>
+        <p class="muted small">Chart: each vertical or team in the selected dates against the same number of days just before. Table: one column per period of the "View by" choice; "Change" compares the last two columns (the last one may still be in progress).</p>
       </section>
 
       <section class="card">
