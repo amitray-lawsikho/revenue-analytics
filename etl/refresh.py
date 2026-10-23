@@ -104,12 +104,36 @@ def calls_rows(raw: list[dict], name_to_email: dict[str, str], all_names: set[st
 
 # ---------------------------------------------------------------- run
 
+def load_sa_info(raw: str) -> dict:
+    """Service-account JSON from a secret: plain JSON, JSON missing its outer braces, or base64 of either."""
+    import base64
+    import binascii
+
+    s = raw.strip().strip("`").strip()
+    candidates = [s, "{" + s.rstrip(",") + "}"]
+    try:
+        b = base64.b64decode(s, validate=False).decode("utf-8").strip()
+        candidates += [b, "{" + b.rstrip(",") + "}"]
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        pass
+    for c in candidates:
+        try:
+            info = json.loads(c)
+        except ValueError:
+            continue
+        if isinstance(info, dict) and info.get("client_email") and info.get("private_key"):
+            return info
+    shape = f"length {len(s)}, starts with {'{' if s.startswith('{') else repr(s[:1]) if s[:1] in '\"[' else 'a letter/number'}"
+    raise RuntimeError(f"BQ_CREDENTIALS is not a service-account JSON key ({shape}). Paste the whole .json file, "
+                       "from the first {{ to the last }}.")
+
+
 def _clients():
     from google.cloud import bigquery
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
-    info = json.loads(os.environ["BQ_CREDENTIALS"])
+    info = load_sa_info(os.environ["BQ_CREDENTIALS"])
     creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     return build("sheets", "v4", credentials=creds, cache_discovery=False), bigquery.Client(credentials=creds, project=C.BQ_PROJECT)
 

@@ -72,3 +72,13 @@ def test_calls_mapping_adds_spellings_and_skips_others():
     rows = calls_rows(raw, n2e, all_names, unmapped)
     assert len(rows) == 1 and rows[0]["outbound"] == 20 and rows[0]["calls_2m"] == 4
     assert ("Zed Unknown", "calls") in unmapped and ("Bilal Khan", "calls") not in unmapped
+
+
+def test_service_account_secret_formats():
+    import base64, json
+    from etl.refresh import load_sa_info
+    key = {"type": "service_account", "client_email": "a@b.iam", "private_key": "-----KEY-----"}
+    full = json.dumps(key)
+    assert load_sa_info(full)["client_email"] == "a@b.iam"
+    assert load_sa_info(full[1:-1])["client_email"] == "a@b.iam"            # outer braces missing
+    assert load_sa_info(base64.b64encode(full.encode()).decode())["private_key"]
