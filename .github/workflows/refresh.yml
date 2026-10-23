@@ -1,0 +1,34 @@
+name: Refresh counsellor performance
+
+# Started at exact times by cron-job.org (09:00, 13:00, 17:00, 20:00 IST) through GitHub's API,
+# or by hand with "Run workflow". No GitHub cron here: it runs late.
+on:
+  workflow_dispatch:
+    inputs:
+      call_days:
+        description: "Days of calling data to re-read (BigQuery keeps about 60)"
+        default: "7"
+        required: false
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+      - name: Refresh
+        run: python -m etl.refresh --call-days "${{ inputs.call_days || '7' }}"
+        env:
+          BQ_CREDENTIALS: ${{ secrets.BQ_CREDENTIALS }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
