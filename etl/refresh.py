@@ -123,6 +123,10 @@ def main(argv: list[str] | None = None) -> int:
     from etl.sheets import read_tab
     from etl.store import Store
 
+    missing = [k for k in ("BQ_CREDENTIALS", "SUPABASE_URL", "SUPABASE_SERVICE_KEY") if not os.environ.get(k, "").strip()]
+    if missing:
+        print(f"::error::Missing secrets: {', '.join(missing)}")
+        return 1
     store = Store()
     load_id = datetime.now(IST).strftime("%Y%m%d%H%M%S")
     detail: dict = {"load_id": load_id}
@@ -179,9 +183,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(detail, indent=2, default=str))
         return 0
     except Exception as exc:  # log the failure for the dashboard, then fail the workflow
-        detail["error"] = str(exc)[:1000]
+        detail["error"] = f"{type(exc).__name__}: {exc}"[:1000]
+        print("::error::" + detail["error"].replace("\n", " "))  # shown as a GitHub annotation
         try:
             store.insert("refresh_log", [{"status": "failed", "detail": detail}])
+        except Exception as log_exc:
+            print("::error::Could not write refresh_log: " + str(log_exc)[:300].replace("\n", " "))
         finally:
             print(json.dumps(detail, indent=2, default=str), file=sys.stderr)
         return 1
