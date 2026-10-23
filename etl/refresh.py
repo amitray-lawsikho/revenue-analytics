@@ -82,11 +82,13 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
 def calls_rows(raw: list[dict], name_to_email: dict[str, str], all_names: set[str], unmapped: dict) -> list[dict]:
     """Map call owners to counsellors in scope and add up per (date, email, dialler)."""
     agg: dict[tuple, dict] = {}
+    first_names = {k.split()[0] for k in name_to_email if k}
     for r in raw:
         n = norm_name(r.get("owner"))
         email = name_to_email.get(n)
         if not email:
-            if n and n not in all_names:  # not in Teamlist at all: possibly a spelling variant
+            # Not in Teamlist at all, and shares a first name with a counsellor in scope: likely a spelling variant
+            if n and n not in all_names and n.split()[0] in first_names:
                 u = unmapped[(r.get("owner") or "", "calls")]
                 u["rows"] += int(r["outbound"] or 0) + int(r["inbound"] or 0)
                 u["last_seen"] = max(u["last_seen"] or r["d"], r["d"])
@@ -189,7 +191,8 @@ def main(argv: list[str] | None = None) -> int:
         store.delete("revenue_txn", f"load_id=neq.{load_id}")
         store.upsert("calls_daily", calls, "call_date,email,dialler")
         store.delete("unmapped_names", "rows=gte.0")
-        top = sorted(unmapped.items(), key=lambda kv: -kv[1]["rows"])[:100]
+        top = [kv for kind in ("revenue", "calls")
+               for kv in sorted((x for x in unmapped.items() if x[0][1] == kind), key=lambda kv: -kv[1]["rows"])[:100]]
         if top:
             store.insert("unmapped_names", [{"name": k[0], "kind": k[1], "rows": v["rows"], "fee_paid": round(v["fee_paid"], 2),
                                              "last_seen": v["last_seen"]} for k, v in top])

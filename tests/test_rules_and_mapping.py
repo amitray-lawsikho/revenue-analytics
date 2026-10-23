@@ -68,10 +68,11 @@ def test_calls_mapping_adds_spellings_and_skips_others():
     base = {"d": date(2026, 10, 20), "dialler": "Acefone", "outbound": 10, "outbound_answered": 4, "inbound": 1,
             "inbound_answered": 1, "talk_sec": 600, "c2": 2, "c5": 1, "c15": 0}
     raw = [{**base, "owner": "Asha Rao"}, {**base, "owner": "asha  rao"}, {**base, "owner": "Bilal Khan"},
-           {**base, "owner": "Zed Unknown"}]
+           {**base, "owner": "Zed Unknown"}, {**base, "owner": "Asha Raoo"}]
     rows = calls_rows(raw, n2e, all_names, unmapped)
     assert len(rows) == 1 and rows[0]["outbound"] == 20 and rows[0]["calls_2m"] == 4
-    assert ("Zed Unknown", "calls") in unmapped and ("Bilal Khan", "calls") not in unmapped
+    assert ("Asha Raoo", "calls") in unmapped                     # same first name as a counsellor: likely a typo
+    assert ("Zed Unknown", "calls") not in unmapped and ("Bilal Khan", "calls") not in unmapped
 
 
 def test_service_account_secret_formats():

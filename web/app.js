@@ -1,7 +1,7 @@
 /* Counsellor Performance dashboard. Data: Supabase RPC get_perf / get_courses (row level security on). */
 const sb = supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey);
 const $ = (id) => document.getElementById(id);
-const S = { from: null, to: null, grain: "month", level: "person", sort: "revenue", dir: -1,
+const S = { cmpLevel: "vertical", cmpMetric: "revenue", from: null, to: null, grain: "month", level: "person", sort: "revenue", dir: -1,
             rows: [], prev: [], roster: [], charts: {} };
 
 /* ---------- formatting ---------- */
@@ -34,6 +34,7 @@ function preset(p) {
     case "month": return [monthStart, t, "day"];
     case "lastmonth": { const e = addDays(monthStart, -1); return [e.slice(0, 8) + "01", e, "week"]; }
     case "fy": return [fyStart(t), t, "month"];
+    case "all": return ["2023-04-01", t, "fy"];
     case "lastfy": { const s = fyStart(t); const ps = (+s.slice(0, 4) - 1) + "-04-01"; return [ps, addDays(s, -1), "month"]; }
   }
 }
@@ -113,7 +114,39 @@ function css(v) { return getComputedStyle(document.documentElement).getPropertyV
 function render() {
   const cur = sum(filtered(S.rows)), prev = sum(filtered(S.prev));
   $("kpis").innerHTML = KPIS.map(([k, label, fmt]) => kpiHtml(label, fmt(cur[k]), cur[k], prev[k])).join("");
-  renderTrend(); renderByVertical(); renderBoard();
+  renderTrend(); renderByVertical(); renderCompare(); renderBoard();
+}
+
+function renderCompare() {
+  const rows = filtered(S.rows), m = S.cmpMetric;
+  const fmt = m === "revenue" ? (v) => rupees(v) : (v) => num(v);
+  const key = S.cmpLevel === "vertical" ? (r) => r.vertical : (r) => r.vertical + " · " + r.team;
+  const periods = [...new Set(rows.map((r) => r.period))].sort();
+  const groups = [...groupBy(rows, key)].map(([k, rs]) => {
+    const byP = groupBy(rs, (r) => r.period);
+    const vals = periods.map((p) => sum(byP.get(p) || [])[m]);
+    return { k, vals, total: vals.reduce((a, b) => a + b, 0) };
+  }).sort((a, b) => b.total - a.total);
+  const palette = [css("--c1"), css("--c2"), css("--c3"), "#9c36b5", "#2f9e44", "#e03131", "#1098ad", "#f08c00", "#5c7cfa", "#868e96"];
+  const shown = groups.slice(0, 10);
+  chart("cmp-chart", {
+    type: periods.length > 1 ? "line" : "bar",
+    data: { labels: periods.map((p) => periodLabel(p, S.grain)),
+      datasets: shown.map((g, i) => ({ label: g.k, data: g.vals, borderColor: palette[i % palette.length],
+        backgroundColor: palette[i % palette.length], tension: 0.25, pointRadius: 3, borderRadius: 4 })) },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${fmt(c.raw)}` } } },
+      scales: { y: { beginAtZero: true, ticks: { callback: (v) => fmt(v) }, grid: { color: css("--line") } }, x: { grid: { display: false } } } },
+  });
+  const tot = periods.map((_, i) => groups.reduce((a, g) => a + g.vals[i], 0));
+  const change = (v) => { const n = v.length; if (n < 2 || !v[n - 2]) return "–";
+    const ch = (v[n - 1] - v[n - 2]) / Math.abs(v[n - 2]); return `<span class="${ch >= 0 ? "up" : "down"}">${ch >= 0 ? "▲" : "▼"} ${Math.abs(ch * 100).toFixed(1)}%</span>`; };
+  const head = `<thead><tr><th class="l">${S.cmpLevel === "vertical" ? "Vertical" : "Team"}</th>${periods.map((p) => `<th>${periodLabel(p, S.grain)}</th>`).join("")}<th class="total">Total</th><th>Change</th><th>Share</th></tr></thead>`;
+  const grand = tot.reduce((a, b) => a + b, 0) || 1;
+  const body = groups.map((g) => `<tr><td class="l">${esc(g.k)}</td>${g.vals.map((v) => `<td class="num">${fmt(v)}</td>`).join("")}
+    <td class="num total">${fmt(g.total)}</td><td class="num">${change(g.vals)}</td><td class="num">${pct(g.total / grand)}</td></tr>`).join("");
+  const foot = `<tr><td class="l"><b>All</b></td>${tot.map((v) => `<td class="num"><b>${fmt(v)}</b></td>`).join("")}<td class="num total">${fmt(grand === 1 && !tot.length ? 0 : tot.reduce((a, b) => a + b, 0))}</td><td class="num">${change(tot)}</td><td class="num">100%</td></tr>`;
+  $("cmp-table").innerHTML = head + `<tbody>${body}${groups.length ? foot : `<tr><td class="l muted">No data for this period.</td></tr>`}</tbody>`;
 }
 function kpiHtml(label, value, c, p) {
   let d = "";
@@ -324,6 +357,10 @@ $("board").addEventListener("click", (e) => {
   if (th) { const k = th.dataset.k; S.dir = S.sort === k ? -S.dir : -1; S.sort = k; renderBoard(); return; }
   const tr = e.target.closest("tr.click"); if (tr) openDrawer(tr.dataset.e);
 });
+document.querySelectorAll("#cmp-level button").forEach((b) => b.addEventListener("click", () => {
+  S.cmpLevel = b.dataset.l; document.querySelectorAll("#cmp-level button").forEach((x) => x.classList.toggle("on", x === b)); renderCompare(); }));
+document.querySelectorAll("#cmp-metric button").forEach((b) => b.addEventListener("click", () => {
+  S.cmpMetric = b.dataset.m; document.querySelectorAll("#cmp-metric button").forEach((x) => x.classList.toggle("on", x === b)); renderCompare(); }));
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
 $("theme").addEventListener("click", () => {
   const root = document.documentElement;

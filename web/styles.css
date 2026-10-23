@@ -101,3 +101,7 @@ footer { padding-top: 8px; }
   .grid2 { grid-template-columns: 1fr; }
   .top, .filters, main { padding-left: 16px; padding-right: 16px; }
 }
+
+.cmp-ctl { display: flex; gap: 8px; flex-wrap: wrap; }
+#cmp-table { margin-top: 12px; }
+#cmp-table td.total, #cmp-table th.total { font-weight: 700; }
