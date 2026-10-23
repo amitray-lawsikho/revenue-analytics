@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     from etl.sheets import read_tab
     from etl.store import Store
 
-    missing = [k for k in ("BQ_CREDENTIALS", "SUPABASE_URL", "SUPABASE_SERVICE_KEY") if not os.environ.get(k, "").strip()]
+    missing = [k for k in ("BQ_CREDENTIALS", "SUPABASE_SERVICE_KEY") if not os.environ.get(k, "").strip()]
     if missing:
         print(f"::error::Missing secrets: {', '.join(missing)}")
         return 1

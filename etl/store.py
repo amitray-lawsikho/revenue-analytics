@@ -12,7 +12,8 @@ BATCH = 1000
 
 class Store:
     def __init__(self, url: str | None = None, key: str | None = None):
-        self.url = (url or os.environ["SUPABASE_URL"]).rstrip("/") + "/rest/v1/"
+        from etl.config import SUPABASE_URL
+        self.url = (url or SUPABASE_URL).rstrip("/") + "/rest/v1/"
         key = key or os.environ["SUPABASE_SERVICE_KEY"]
         self.headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 

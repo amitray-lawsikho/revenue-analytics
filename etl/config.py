@@ -20,6 +20,8 @@ SCOPE_VERTICALS = tuple(
     v.strip() for v in os.environ.get("SCOPE_VERTICALS", "Team Uzair,Team Darshan,Team Deepanshi").split(",") if v.strip()
 )
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip() or "https://oifzauaspvfkmzyutwtj.supabase.co"
+
 BQ_PROJECT = os.environ.get("BQ_PROJECT", "studious-apex-488820-c3")
 BQ_DATASET = os.environ.get("BQ_DATASET", "crm_dashboard")
 
