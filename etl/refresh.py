@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::Missing secrets: {', '.join(missing)}")
         return 1
     store = Store()
-    started = datetime.now(timezone.utc).isoformat()
+    started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # no "+": it breaks in URLs
     load_id = datetime.now(IST).strftime("%Y%m%d%H%M%S")
     detail: dict = {"load_id": load_id, "full": full}
     try:
