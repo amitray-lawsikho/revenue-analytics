@@ -102,7 +102,7 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
             "txn_date": d.isoformat(), "caller_name_raw": raw_name, **a,
             "brand": (r.get("brand") or "").strip(), "course": (r.get("course") or "").strip(),
             "source": (r.get("source") or "").strip(), "enrollment_type": (r.get("enrollment") or "").strip(),
-            "is_new_enrolment": is_new_enrolment(r.get("enrollment")), "fee_paid": fee,
+            "is_new_enrolment": is_new_enrolment(r.get("enrollment"), fee), "fee_paid": fee,
             "sheet": sheet, "load_id": load_id,
         })
     return out

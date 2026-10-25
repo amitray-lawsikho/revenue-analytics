@@ -12,7 +12,8 @@ def test_rules():
     assert parse_date("01/10/2026") == date(2026, 10, 1)
     assert parse_date("") is None and parse_date("n/a") is None
     assert parse_amount("58,140") == 58140 and parse_amount("₹ 2,000.50") == 2000.5 and parse_amount("") == 0
-    assert is_new_enrolment(" New enrollment ") and not is_new_enrolment("Bootcamp collections - balance payments")
+    assert is_new_enrolment(" New enrollment ", 2000) and not is_new_enrolment("Bootcamp collections - balance payments", 50000)
+    assert not is_new_enrolment("New enrollment", 1500) and not is_new_enrolment("New enrollment", 999)  # must be above ₹1,500
     assert norm_name("Amit  Ray.") == "amit ray"
     assert fy_label(date(2026, 3, 31)) == "FY2025-26" and fy_label(date(2026, 4, 1)) == "FY2026-27"
 
@@ -52,12 +53,13 @@ def test_revenue_attribution_rules():
          "enrollment": "New enrollment - balance payment"},     # revenue only
         {"_row": 4, "date": "06/10/2026", "caller": "Direct", "fee_paid": "999", "enrollment": "Other revenue",
          "team": "Bootcamp - Direct", "vertical": "Direct"},
-        {"_row": 5, "date": "07/10/2026", "caller": "Old Person", "fee_paid": "700", "enrollment": "New enrollment",
+        {"_row": 5, "date": "07/10/2026", "caller": "Old Person", "fee_paid": "7000", "enrollment": "New enrollment",
          "team": "Elite", "vertical": "Team Uzair"},              # resigned: sheet's own team
         {"_row": 6, "date": "07/10/2026", "caller": "", "fee_paid": "300", "enrollment": ""},
+        {"_row": 10, "date": "09/10/2026", "caller": "Asha Rao", "fee_paid": "1,500", "enrollment": "New enrollment"},
         {"_row": 7, "date": "01/03/2026", "caller": "Asha Rao", "fee_paid": "1", "enrollment": "New enrollment"},
         {"_row": 8, "date": "", "caller": "Asha Rao", "fee_paid": "1", "enrollment": "New enrollment"},
-        {"_row": 9, "date": "08/10/2026", "caller": "Asha", "fee_paid": "50", "enrollment": "New enrollment"},
+        {"_row": 9, "date": "08/10/2026", "caller": "Asha", "fee_paid": "5000", "enrollment": "New enrollment"},
     ]
     rows = revenue_rows(raw, "Combined", lambda d: d >= date(2026, 4, 1), n2e, by_email, "L1", unmapped)
     got = [(r["caller"], r["caller_status"], r["team"], r["vertical"], r["fee_paid"], r["is_new_enrolment"]) for r in rows]
@@ -65,9 +67,10 @@ def test_revenue_attribution_rules():
         ("Asha Rao", "current", "Elite", "Team Uzair", 10000, True),
         ("Asha Rao", "current", "Elite", "Team Uzair", 5000, False),
         ("Direct", "direct", "Bootcamp - Direct", "Direct", 999, False),
-        ("Old Person", "resigned", "Elite", "Team Uzair", 700, True),
+        ("Old Person", "resigned", "Elite", "Team Uzair", 7000, True),
         ("Lead details not available", "no caller", "Not assigned", "Not assigned", 300, False),
-        ("Asha", "resigned", "Resigned – team unknown", "Resigned – team unknown", 50, True),  # exact names only
+        ("Asha Rao", "current", "Elite", "Team Uzair", 1500, False),   # not above ₹1,500: revenue only
+        ("Asha", "resigned", "Resigned – team unknown", "Resigned – team unknown", 5000, True),  # exact names only
     ]
     assert ("Old Person", "revenue") in unmapped and ("Direct", "revenue") not in unmapped
 
