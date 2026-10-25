@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sales Analytics Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script>try { const t = localStorage.getItem("sa-theme"); if (t) document.documentElement.dataset.theme = t; } catch (_) {}</script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
@@ -15,22 +15,38 @@
 <body>
   <!-- Sign in -->
   <section id="auth" class="auth" hidden>
-    <div class="auth-card">
-      <div class="brand"><span class="logo">SA</span><span>Sales Analytics Dashboard</span></div>
-      <p class="muted">Sign in with your work email. Only approved emails can see data.</p>
-      <form id="auth-form">
-        <label>Email <input id="auth-email" type="email" autocomplete="username" required></label>
-        <label>Password <input id="auth-pass" type="password" autocomplete="current-password" minlength="8" required></label>
-        <button type="submit" class="btn primary">Sign in</button>
-        <button type="button" id="auth-signup" class="btn ghost">First time? Create account</button>
-      </form>
-      <p id="auth-msg" class="msg"></p>
+    <div class="auth-art">
+      <div class="monogram lg">SA</div>
+      <p class="eyebrow">LawSikho · Skill Arbitrage</p>
+      <h1 class="auth-title">Sales Analytics</h1>
+      <div class="rule"><span></span><i>◆</i><span></span></div>
+      <p class="auth-lead">Revenue and enrolments across every financial year, vertical, team and caller — refreshed five times a day.</p>
+      <ul class="auth-points">
+        <li><b>Overall</b> every year, month and part of month, side by side</li>
+        <li><b>Verticals &amp; teams</b> credited to each caller's current team</li>
+        <li><b>Callers</b> leaderboard, trends and course mix</li>
+      </ul>
+    </div>
+    <div class="auth-panel">
+      <div class="auth-card">
+        <p class="eyebrow">Welcome back</p>
+        <h2 class="auth-h">Sign in</h2>
+        <p class="muted small">Use your work email. Only approved emails can open the dashboard.</p>
+        <form id="auth-form">
+          <label>Email <input id="auth-email" type="email" autocomplete="username" placeholder="name@lawsikho.in" required></label>
+          <label>Password <input id="auth-pass" type="password" autocomplete="current-password" minlength="8" placeholder="8+ characters" required></label>
+          <button type="submit" class="btn primary block">Sign in</button>
+          <button type="button" id="auth-signup" class="btn ghost block">First time here? Create your account</button>
+        </form>
+        <p id="auth-msg" class="msg"></p>
+        <p class="credit-auth">Designed and developed by Amit Ray · amitray@lawsikho.in</p>
+      </div>
     </div>
   </section>
 
   <div id="app" class="shell" hidden>
     <aside class="side" id="side">
-      <div class="brand"><span class="logo">SA</span><span>Sales Analytics<br><small>Dashboard</small></span></div>
+      <div class="brand"><span class="monogram">SA</span><span class="brand-t">Sales Analytics<small>Dashboard</small></span></div>
       <nav>
         <div class="nav-h">Revenue Metrics</div>
         <a href="#overall" data-page="overall"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/></svg>Overall Performance</a>
@@ -52,8 +68,9 @@
 
     <main class="main">
       <header class="page-h">
-        <button id="menu" class="btn ghost sm" title="Show / hide the sidebar" aria-label="Show or hide the sidebar"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <button id="menu" class="btn ghost sm icon" title="Show / hide the sidebar" aria-label="Show or hide the sidebar"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <div>
+          <p class="eyebrow" id="page-eyebrow">Revenue Metrics</p>
           <h1 id="page-title">Overall Performance</h1>
           <p id="page-sub" class="muted small"></p>
         </div>
@@ -69,7 +86,7 @@
           <label>Financial year <select id="fy"><option value="">Custom dates</option></select></label>
           <label>From <input type="date" id="from"></label>
           <label>To <input type="date" id="to"></label>
-          <label>View by <select id="grain"><option value="day">Day</option><option value="week">Week</option>
+          <label>View by <select id="grain"><option value="day">Day</option><option value="part">Part of month (1–10, 11–20, 21–end)</option>
             <option value="month">Month</option><option value="fy">Financial year</option></select></label>
           <label data-for="vertical team caller">Vertical <select id="f-vertical"><option value="">All verticals</option></select></label>
           <label data-for="team caller">Team <select id="f-team"><option value="">All teams</option></select></label>
@@ -84,7 +101,7 @@
     </main>
 
     <aside id="drawer" class="drawer" hidden>
-      <div class="drawer-h"><h2 id="d-name"></h2><button id="d-close" class="btn ghost sm">✕</button></div>
+      <div class="drawer-h"><div><p class="eyebrow">Caller</p><h2 id="d-name"></h2></div><button id="d-close" class="btn ghost sm">✕</button></div>
       <p id="d-sub" class="muted small"></p>
       <div class="kpis" id="d-kpis"></div>
       <div class="card"><h3>Revenue and new enrolments</h3><div class="chart-box"><canvas id="d-trend"></canvas></div></div>
