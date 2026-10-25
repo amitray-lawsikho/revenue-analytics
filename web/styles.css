@@ -106,7 +106,24 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var
 .card-h h3 { margin: 0; }
 .filters { display: grid; gap: 14px; }
 .filter-row { display: flex; flex-wrap: wrap; gap: 12px; }
-.filter-row label { flex: 1 1 160px; }
+.filter-row label, .filter-row .lbl { flex: 1 1 160px; }
+.lbl { display: grid; gap: 6px; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; min-width: 0; }
+.ms { position: relative; }
+.ms-btn { width: 100%; text-align: left; font: 500 13.5px Inter, sans-serif; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 30px 10px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; }
+.ms-btn::after { content: "▾"; position: absolute; right: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.ms-btn.on { border-color: var(--gold); color: var(--gold-2); }
+.ms-pop { position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: max(100%, 320px); background: var(--raise); border: 1px solid var(--line-2);
+  border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.45); padding: 10px; text-transform: none; letter-spacing: 0; }
+.ms-pop input { width: 100%; }
+.ms-act { display: flex; gap: 6px; margin: 8px 0; }
+.ms-act button { flex: 1; font: 600 12px Inter, sans-serif; color: var(--gold-2); background: transparent; border: 1px solid var(--line); border-radius: 7px; padding: 5px; cursor: pointer; }
+.ms-list { max-height: 290px; overflow-y: auto; display: grid; gap: 1px; }
+.ms-item { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--ink); font-weight: 500; }
+.ms-item:hover { background: var(--gold-soft); }
+.ms-item input { width: auto; accent-color: var(--gold); margin: 0; }
+.ms-item small { color: var(--muted); font-weight: 400; margin-left: auto; white-space: nowrap; font-size: 11px; }
+.ms-more { font-size: 11.5px; color: var(--muted); padding: 6px 8px; }
 .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 3px; width: fit-content; max-width: 100%; }
 .seg button { border: 0; background: transparent; color: var(--muted); font: 600 12.5px Inter, sans-serif; padding: 7px 13px; border-radius: 7px; cursor: pointer; }
 .seg button:hover { color: var(--ink); }
@@ -119,7 +136,7 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var
 .kpi { position: relative; background: linear-gradient(180deg, var(--raise), var(--panel)); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px 15px; box-shadow: var(--shadow); overflow: hidden; }
 .kpi::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: linear-gradient(90deg, var(--gold), transparent 75%); }
 .kpi .k { font-size: 10.5px; color: var(--muted); font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
-.kpi .v { font: 600 36px/1.05 "Cormorant Garamond", serif; margin-top: 8px; color: var(--ink); }
+.kpi .v { font: 700 28px/1.15 Inter, sans-serif; margin-top: 8px; color: var(--ink); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
 .kpi .p { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
 .kpi .d { font-size: 12px; margin-top: 8px; color: var(--muted); padding-top: 8px; border-top: 1px dashed var(--line); }
 .up { color: var(--good); } .down { color: var(--bad); }
@@ -146,6 +163,7 @@ tr.total td { font-weight: 700; border-top: 1px solid var(--line-2); color: var(
 
 /* heatmap + chips */
 .heat td.cell { text-align: center; min-width: 78px; line-height: 1.25; }
+.heat th { text-align: center; } .heat th:first-child { text-align: left; } .heat th:last-child, .heat td:last-child { text-align: right; }
 .heat td.cell small { display: block; font-size: 10.5px; color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 4px 3px 10px; border-radius: 999px; border: 1px solid var(--line-2); }

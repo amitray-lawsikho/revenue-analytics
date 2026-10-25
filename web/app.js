@@ -1,4 +1,4 @@
-/* Sales Analytics Dashboard — Revenue Metrics. Data: Supabase RPC rev_agg_json / rev_dims_json / rev_courses (RLS on). */
+/* Sales Analytics Dashboard — Revenue Metrics. Data: Supabase RPC rev_aggm_json / rev_dims_json / rev_coursesm (RLS on). */
 const sb = supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey);
 const $ = (id) => document.getElementById(id);
 const PAGES = {
@@ -8,7 +8,9 @@ const PAGES = {
   caller: { title: "Caller Wise Performance", level: "caller", label: "Caller" },
 };
 const STATUS = { current: "Current", resigned: "Resigned", direct: "Direct", "no caller": "No caller details" };
-const S = { page: "overall", dims: [], charts: {}, sort: { k: "revenue", dir: -1 }, pivotMetric: "revenue", seq: 0, lineKeys: null };
+const GRAINS = { day: "Day", part: "Part of month", month: "Month", fy: "Financial year" };
+const S = { page: "overall", dims: [], charts: {}, sort: { k: "revenue", dir: -1 }, pivotMetric: "revenue", seq: 0, cgrain: "month",
+  sel: { vertical: new Set(), team: new Set(), caller: new Set() } };
 
 /* ---------- format ---------- */
 const inr0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
@@ -24,6 +26,7 @@ const full = (v) => (v == null || !isFinite(v) ? "" : "₹" + inr0.format(Math.r
 const money = (v) => (v == null || !isFinite(v) ? "–" : `<span class="num" title="${full(v)}">${rupees(v)}</span>`);  // hover = exact amount
 const both = (v) => `${rupees(v)} (${full(v)})`;
 const num = (v) => (v == null || !isFinite(v) ? "–" : inr0.format(v));
+const compact = (v) => (v >= 1e4 ? (v / 1e3).toFixed(0) + "k" : v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : String(v));
 const pct = (v) => (v == null || !isFinite(v) ? "–" : (v * 100).toFixed(1) + "%");
 const change = (c, p) => (p ? (c - p) / Math.abs(p) : null);
 const chHtml = (ch) => ch == null ? `<span class="muted">–</span>` :
@@ -45,11 +48,10 @@ function periodLabel(p, g) {
   const d = D(p);
   if (g === "day") return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
   if (g === "part") { const day = d.getUTCDate(), end = day === 21 ? daysIn(d.getUTCFullYear(), d.getUTCMonth() + 1) : day + 9; return `${day}–${end} ${short(p)}`; }
-  if (g === "week") return "Wk of " + d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
   if (g === "month") return d.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
   const y = d.getUTCFullYear(); return `FY ${y}-${String(y + 1).slice(2)}`;
 }
-const lyKey = (p, g) => (g === "week" ? addDays(p, -364) : lastYear(p));  // the same period one year earlier
+const spanDays = (a, b) => Math.round((D(b) - D(a)) / 864e5) + 1;
 function preset(p) {
   const t = istToday(), ms = t.slice(0, 8) + "01";
   switch (p) {
@@ -64,13 +66,14 @@ function preset(p) {
 
 /* ---------- data (one request per query) ---------- */
 async function rpcJson(fn, args) { const { data, error } = await sb.rpc(fn, args); if (error) throw error; return data || []; }
-const agg = (args) => rpcJson("rev_agg_json", { p_vertical: null, p_team: null, p_status: null, p_caller: null, ...args });
+const agg = (args) => rpcJson("rev_aggm_json", { p_verticals: null, p_teams: null, p_status: null, p_callers: null, ...args });
 function range() { const from = $("from").value, to = $("to").value; return { from, to, pf: lastYear(from), pt: lastYear(to), grain: $("grain").value }; }
+const arr = (set) => (set.size ? [...set] : null);
 function filters(level) {
   const f = {};
-  if (level !== "none") f.p_vertical = $("f-vertical").value || null;
-  if (level === "team" || level === "caller") f.p_team = $("f-team").value || null;
-  if (level === "caller") f.p_status = $("f-status").value || null;
+  if (level !== "none") f.p_verticals = arr(S.sel.vertical);
+  if (level === "team" || level === "caller") f.p_teams = arr(S.sel.team);
+  if (level === "caller") { f.p_status = $("f-status").value || null; f.p_callers = arr(S.sel.caller); }
   return f;
 }
 const tot = (rows) => rows.reduce((a, r) => ({ revenue: a.revenue + Number(r.revenue || 0),
@@ -79,21 +82,25 @@ const tot = (rows) => rows.reduce((a, r) => ({ revenue: a.revenue + Number(r.rev
 /* ---------- charts ---------- */
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const palette = () => ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6", "--c7", "--c8"].map(css);
-const barLabels = {  // writes enrolment counts on bars: one dataset (labels) or every dataset (all), optionally rotated
+const barLabels = {  // writes enrolment counts on bars, horizontally; shortens (1.4k) when the bar is narrower than the number
   id: "barLabels",
   afterDatasetsDraw(chart) {
     const o = chart.options.plugins.barLabels; if (!o) return;
     const sets = o.all ? o.all.map((l, i) => [i, l]) : o.labels ? [[o.dataset ?? 0, o.labels]] : [];
     const ctx = chart.ctx, horiz = chart.options.indexAxis === "y"; ctx.save();
-    ctx.font = `600 ${o.size || 11}px Inter, sans-serif`; ctx.fillStyle = css("--ink");
+    ctx.fillStyle = css("--ink");
     for (const [di, labels] of sets) {
-      const meta = chart.getDatasetMeta(di); if (!meta || meta.hidden || meta.data.length > (o.max || 45)) continue;
+      const meta = chart.getDatasetMeta(di); if (!meta || meta.hidden || meta.data.length > (o.max || 60)) continue;
       meta.data.forEach((el, i) => {
-        const t = labels[i]; if (!t || el.y == null || isNaN(el.y)) return;
-        if (horiz) { ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(t, el.x + 6, el.y); }
-        else if (o.rotate) { ctx.save(); ctx.translate(el.x, Math.min(el.y, el.base) - 4); ctx.rotate(-Math.PI / 2);
-          ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(t, 0, 0); ctx.restore(); }
-        else { ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText(t, el.x, Math.min(el.y, el.base) - 4); }
+        let t = labels[i]; if (t == null || t === "" || el.y == null || isNaN(el.y)) return;
+        if (horiz) { ctx.font = "600 11px Inter, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(String(t), el.x + 6, el.y); return; }
+        // neighbouring bars alternate between two heights, so numbers wider than a bar never collide
+        const room = o.stagger ? el.width * 2 + 2 : el.width + 6;
+        let size = 11; ctx.font = `600 ${size}px Inter, sans-serif`;
+        if (typeof t === "number") { const s = num(t); t = ctx.measureText(s).width <= room ? s : compact(t); }
+        while (ctx.measureText(t).width > room && size > 8) { size--; ctx.font = `600 ${size}px Inter, sans-serif`; }
+        const lift = o.stagger && di % 2 ? 14 : 0;
+        ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText(t, el.x, Math.min(el.y, el.base) - 3 - lift);
       });
     }
     ctx.restore();
@@ -110,14 +117,24 @@ function chart(id, cfg) {
   S.charts[id] = new Chart(el, cfg);
 }
 const yRupees = () => ({ beginAtZero: true, ticks: { callback: (v) => rupees(v) }, grid: { color: css("--line") }, border: { display: false } });
-function revenueBarsConfig(labels, rev, enr, extraTip) {
+function revenueBarsConfig(labels, rev, enr) {
   return {
     type: "bar",
     data: { labels, datasets: [{ label: "Revenue", data: rev, backgroundColor: css("--gold"), borderRadius: 4, maxBarThickness: 46 }] },
     options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 22 } },
       plugins: { legend: { display: false }, barLabels: { labels: enr.map((e) => `${num(e)} enr`) },
-        tooltip: { callbacks: { label: (c) => ` Revenue ${both(c.raw)}`, afterLabel: (c) => ` New enrolments ${num(enr[c.dataIndex])}` + (extraTip ? extraTip(c.dataIndex) : "") } } },
+        tooltip: { callbacks: { label: (c) => ` Revenue ${both(c.raw)}`, afterLabel: (c) => ` New enrolments ${num(enr[c.dataIndex])}` } } },
       scales: { y: yRupees(), x: { grid: { display: false } } } },
+  };
+}
+function groupedBars(labels, sets, rotateTicks) {  // sets: [{label, color, rev[], enr[]}]
+  return {
+    type: "bar",
+    data: { labels, datasets: sets.map((s) => ({ label: s.label, data: s.rev, backgroundColor: s.color, borderRadius: 3, barPercentage: .92, categoryPercentage: .86, maxBarThickness: 40 })) },
+    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 38 } },
+      plugins: { legend: { position: "bottom" }, barLabels: { all: sets.map((s) => s.rev.map((v, i) => (v ? s.enr[i] : ""))), max: 400, stagger: sets.length > 1 },
+        tooltip: { mode: "index", callbacks: { label: (c) => c.raw == null ? null : ` ${c.dataset.label}: ${both(c.raw)} · ${num(sets[c.datasetIndex].enr[c.dataIndex])} enr` } } },
+      scales: { y: yRupees(), x: { grid: { display: false }, ticks: rotateTicks ? { maxRotation: 40, minRotation: 0 } : {} } } },
   };
 }
 
@@ -146,7 +163,7 @@ async function render() {
   $("content").classList.remove("loading");
 }
 
-/* ---------- Overall: KPIs, all years, current FY by month, current month in 3 parts ---------- */
+/* ---------- Overall ---------- */
 const MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
 const fyOf = (s) => +fyStart(s).slice(0, 4);
 const fyName = (y) => `FY ${y}-${String(y + 1).slice(2)}`;
@@ -166,12 +183,12 @@ async function renderOverall(seq) {
   const ms = today.slice(0, 8) + "01", fs = fyStart(today);
   const mCur = sumRange(days, ms, today), mPrev = sumRange(days, lastYear(ms), lastYear(today));
   const fCur = sumRange(days, fs, today), fPrev = sumRange(days, lastYear(fs), lastYear(today));
-  const fy = new Map(fys.map((y) => [y, { y, revenue: 0, enrolments: 0, payments: 0, ytdRev: 0, ytdEnr: 0, mtdRev: 0, partRev: 0,
+  const fy = new Map(fys.map((y) => [y, { y, revenue: 0, enrolments: 0, ytdRev: 0, ytdEnr: 0, mtdRev: 0, partRev: 0,
     months: MONTHS.map(() => ({ revenue: 0, enrolments: 0 })) }]));
   const parts = new Map(fys.map((y) => [y, PARTS.map(() => ({ revenue: 0, enrolments: 0 }))]));
   for (const d of days) {
     const y = fyOf(d.period), o = fy.get(y), rev = +d.revenue, enr = +d.enrolments, m = +d.period.slice(5, 7), mi = (m + 8) % 12, day = +d.period.slice(8, 10);
-    o.revenue += rev; o.enrolments += enr; o.payments += +d.payments;
+    o.revenue += rev; o.enrolments += enr;
     o.months[mi].revenue += rev; o.months[mi].enrolments += enr;
     if (mi < mIdx || (mi === mIdx && day <= curDay)) { o.ytdRev += rev; o.ytdEnr += enr; }
     if (m === curMonth) { const p = parts.get(y)[partOf(day)]; p.revenue += rev; p.enrolments += enr;
@@ -191,7 +208,6 @@ async function renderOverall(seq) {
       ${kpi(`Revenue · ${fyName(curFy)}`, money(fCur.revenue), fCur.revenue, fPrev.revenue, `${nice(lastYear(fs))} – ${nice(lastYear(today))}`, `${nice(fs)} – ${nice(today)}`)}
       ${kpi(`New enrolments · ${fyName(curFy)}`, num(fCur.enrolments), fCur.enrolments, fPrev.enrolments, `${nice(lastYear(fs))} – ${nice(lastYear(today))}`, `${nice(fs)} – ${nice(today)}`)}
     </section>
-
     <section class="grid2">
       <div class="card"><div class="card-h"><h3>Revenue by financial year</h3><span class="muted small">Label = new enrolments · ${fyName(curFy)} in progress</span></div>
         <div class="chart-box"><canvas id="ch-fy"></canvas></div></div>
@@ -203,7 +219,6 @@ async function renderOverall(seq) {
           list.map((x, i) => ({ ...x, n: fyName(x.y), g: i && x.y !== curFy ? change(x.revenue, list[i - 1].revenue) : null, gs: i ? change(x.ytdRev, list[i - 1].ytdRev) : null })))}</div>
         <p class="note">Full-year growth stays blank for ${fyName(curFy)} until the year ends; read the same-dates columns.</p></div>
     </section>
-
     <section class="card"><div class="card-h"><h3>${fyName(curFy)} month by month, compared with earlier years</h3>
       <span class="muted small">Gold = ${fyName(curFy)} · number on each bar = new enrolments of that year</span></div>
       <div class="chart-box" style="height:400px"><canvas id="ch-month"></canvas></div>
@@ -214,7 +229,6 @@ async function renderOverall(seq) {
           : x.i === mIdx ? chHtml(change(cur.mtdRev, (fy.get(curFy - 1) || {}).mtdRev)) + ` <span class="muted small">(1–${curDay})</span>` : "" }],
         MONTHS.map((m, i) => { const o = { m, i }; fys.forEach((y) => (o[y] = fy.get(y).months[i])); return o; }))}</div>
       <p class="note">${MONTHS[mIdx]} is in progress: its change compares days 1–${curDay} with days 1–${curDay} of ${MONTHS[mIdx]} last year; the chart shows earlier years' full months.</p></section>
-
     <section class="card"><div class="card-h"><h3>${monthName} in three parts, compared with ${monthName} of earlier years</h3>
       <span class="muted small">Days 1–10, 11–20, 21–${lastDay} · gold = ${monthName} ${monthYear(curFy)}</span></div>
       <div class="chart-box"><canvas id="ch-parts"></canvas></div>
@@ -228,40 +242,29 @@ async function renderOverall(seq) {
 
   chart("ch-fy", revenueBarsConfig(list.map((x) => fyName(x.y)), list.map((x) => x.revenue), list.map((x) => x.enrolments)));
   const cols = fyColors(fys.length);
-  const grouped = (labels, revOf, enrOf, rotate) => ({
-    type: "bar",
-    data: { labels, datasets: fys.map((y, i) => ({ label: fyName(y), data: labels.map((_, j) => revOf(y, j)), backgroundColor: cols[i],
-      borderRadius: 3, barPercentage: .9, categoryPercentage: .84 })) },
-    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: rotate ? 44 : 22 } },
-      plugins: { legend: { position: "bottom" },
-        barLabels: { all: fys.map((y) => labels.map((_, j) => (revOf(y, j) == null ? "" : num(enrOf(y, j))))), rotate, size: rotate ? 10 : 11, max: 60 },
-        tooltip: { mode: "index", callbacks: { label: (c) => c.raw == null ? null : ` ${c.dataset.label}: ${both(c.raw)} · ${num(enrOf(fys[c.datasetIndex], c.dataIndex))} enr` } } },
-      scales: { y: yRupees(), x: { grid: { display: false } } } },
-  });
-  chart("ch-month", grouped(MONTHS, (y, i) => (y === curFy && i > mIdx ? null : fy.get(y).months[i].revenue), (y, i) => fy.get(y).months[i].enrolments, true));
-  chart("ch-parts", grouped(PARTS.map((p) => `Days ${p}`), (y, i) => (y === curFy && i > partOf(curDay) ? null : parts.get(y)[i].revenue), (y, i) => parts.get(y)[i].enrolments, false));
+  chart("ch-month", groupedBars(MONTHS, fys.map((y, i) => ({ label: fyName(y), color: cols[i],
+    rev: MONTHS.map((_, j) => (y === curFy && j > mIdx ? null : fy.get(y).months[j].revenue)), enr: MONTHS.map((_, j) => fy.get(y).months[j].enrolments) }))));
+  chart("ch-parts", groupedBars(PARTS.map((p) => `Days ${p}`), fys.map((y, i) => ({ label: fyName(y), color: cols[i],
+    rev: PARTS.map((_, j) => (y === curFy && j > partOf(curDay) ? null : parts.get(y)[j].revenue)), enr: PARTS.map((_, j) => parts.get(y)[j].enrolments) }))));
 }
 
 /* ---------- Vertical / Team / Caller ---------- */
 const keyOf = { vertical: (x) => x.vertical, team: (x) => `${x.team}||${x.vertical}`, caller: (x) => `${x.caller}||${x.caller_status}||${x.team}||${x.vertical}` };
-const spanDays = (a, b) => Math.round((D(b) - D(a)) / 864e5) + 1;
+const trendGrain = (g, r) => (g === "day" && spanDays(r.from, r.to) > 62 ? "month" : g);   // never hundreds of day columns
 async function renderLevel(r, seq, page) {
-  const lvl = page.level, base = { p_group: lvl, ...filters(lvl) };
-  const tg = r.grain === "day" && spanDays(r.from, r.to) > 62 ? "month" : r.grain;   // trends: never hundreds of day columns
+  const lvl = page.level, base = { p_group: lvl, ...filters(lvl) }, isCaller = lvl === "caller";
+  const tg = trendGrain(isCaller ? S.cgrain : r.grain, r);
   const [cur, ly, series] = await Promise.all([
     agg({ p_from: r.from, p_to: r.to, p_grain: "none", ...base }),
     agg({ p_from: r.pf, p_to: r.pt, p_grain: "none", ...base }),
-    agg({ p_from: r.from, p_to: r.to, p_grain: tg, ...base }),
+    isCaller ? null : agg({ p_from: r.from, p_to: r.to, p_grain: tg, ...base }),
   ]);
   if (seq !== S.seq) return;
   const k = keyOf[lvl], lyBy = new Map(ly.map((x) => [k(x), x]));
-  const q = ($("f-caller").value || "").trim().toLowerCase();
-  const match = (x) => !q || (x.caller || "").toLowerCase().includes(q);
-  let rows = cur.filter(match).map((x) => { const l = lyBy.get(k(x));
+  let rows = cur.map((x) => { const l = lyBy.get(k(x));
     return { key: k(x), vertical: x.vertical, team: x.team, caller: x.caller, status: x.caller_status,
       revenue: +x.revenue, enrolments: +x.enrolments, payments: +x.payments, ly_revenue: l ? +l.revenue : 0, ly_enrolments: l ? +l.enrolments : 0 }; });
-  const ser = series.filter(match);
-  const c = tot(rows), pTot = tot(ly.filter(match)), all = c.revenue || 1;
+  const c = tot(rows), pTot = tot(ly), all = c.revenue || 1;
   rows.forEach((x) => { x.share = x.revenue / all; x.change = change(x.revenue, x.ly_revenue); });
   rows.sort((a, b) => S.sort.dir * (((a[S.sort.k] ?? -Infinity) > (b[S.sort.k] ?? -Infinity)) ? 1 : -1));
   rows.forEach((x, i) => (x._i = i));
@@ -269,42 +272,51 @@ async function renderLevel(r, seq, page) {
   const byRev = [...rows].sort((a, b) => b.revenue - a.revenue), top = byRev.slice(0, 15);
   const name = (x) => lvl === "vertical" ? x.vertical : lvl === "team" ? x.team : x.caller;
   const prevText = `${nice(r.pf)} – ${nice(r.pt)}`, curText = `${nice(r.from)} – ${nice(r.to)}`;
+
+  // caller trends: the callers chosen in the Caller filter, else the 8 biggest (people only); heatmap = top 25
+  let ser = series, trendKeys = [], heat = [];
+  if (isCaller) {
+    const people = byRev.filter((x) => x.status === "current" || x.status === "resigned");
+    trendKeys = (S.sel.caller.size ? byRev.slice(0, 15) : people.slice(0, 8)).map((x) => x.key);
+    heat = byRev.slice(0, 25);
+    const names = [...new Set([...heat, ...rows.filter((x) => trendKeys.includes(x.key))].map((x) => x.caller))];
+    ser = names.length ? await agg({ p_from: r.from, p_to: r.to, p_grain: tg, ...base, p_callers: names }) : [];
+    if (seq !== S.seq) return;
+  }
   const periods = [...new Set(ser.map((x) => x.period))].sort();
-  const cell = new Map(); ser.forEach((x) => { cell.set(k(x) + "@" + x.period, x); });
-  const gnote = tg !== r.grain ? ` (shown by month: the dates span more than 62 days)` : "";
+  const cell = new Map(); ser.forEach((x) => cell.set(k(x) + "@" + x.period, x));
+  const gnote = tg !== (isCaller ? S.cgrain : r.grain) ? ` · shown by month (the dates span more than 62 days)` : "";
 
   const cols = [{ h: "#", f: (x) => (x._total ? "" : x._i + 1) }];
-  if (lvl === "caller") cols.push({ h: "Caller", k: "caller", l: 1 },
+  if (isCaller) cols.push({ h: "Caller", k: "caller", l: 1 },
     { h: "Type", l: 1, f: (x) => x._total ? "" : `<span class="badge ${x.status === "no caller" ? "" : esc(x.status)}">${esc(STATUS[x.status] || x.status)}</span>` });
   if (lvl !== "vertical") cols.push({ h: "Team", k: "team", l: 1 });
   cols.push({ h: "Vertical", k: "vertical", l: 1 },
-    { h: "Revenue", k: "revenue", f: (x) => money(x.revenue) }, { h: "New enrolments", k: "enrolments", f: (x) => num(x.enrolments) },
-    { h: "Payments", k: "payments", f: (x) => num(x.payments) }, { h: "Share", k: "share", f: (x) => pct(x.share) },
+    { h: "Revenue", k: "revenue", f: (x) => money(x.revenue) }, { h: "New enrolments", k: "enrolments", f: (x) => num(x.enrolments) });
+  if (!isCaller) cols.push({ h: "Payments", k: "payments", f: (x) => num(x.payments) });
+  cols.push({ h: "Share", k: "share", f: (x) => pct(x.share) },
     { h: "Revenue last year", k: "ly_revenue", f: (x) => money(x.ly_revenue) }, { h: "Enrolments last year", k: "ly_enrolments", f: (x) => num(x.ly_enrolments) },
     { h: "Change", k: "change", f: (x) => chHtml(x.change) });
   const totalRow = { _total: 1, _i: -1, caller: "Total", team: lvl === "team" ? "Total" : "", vertical: lvl === "vertical" ? "Total" : "",
     revenue: c.revenue, enrolments: c.enrolments, payments: c.payments, share: 1, ly_revenue: pTot.revenue, ly_enrolments: pTot.enrolments, change: change(c.revenue, pTot.revenue) };
 
-  // trend (vertical/team): one bar per group in each period — every vertical; the 10 biggest teams + Others
+  // vertical/team trend: one bar per group (every vertical; the 10 biggest teams + Others)
   const bigKeys = (lvl === "vertical" ? byRev : top.slice(0, 10)).map((x) => x.key), grp = new Map();
-  for (const x of ser) { const key = bigKeys.includes(k(x)) ? k(x) : "Others";
+  if (!isCaller) for (const x of ser) { const key = bigKeys.includes(k(x)) ? k(x) : "Others";
     if (!grp.has(key)) grp.set(key, new Map()); const m = grp.get(key), o = m.get(x.period) || { revenue: 0, enrolments: 0 };
     o.revenue += +x.revenue; o.enrolments += +x.enrolments; m.set(x.period, o); }
   const metric = S.pivotMetric, pf = metric === "revenue" ? money : num;
-  const pivRows = byRev.map((x) => { const o = { n: name(x) + (lvl === "team" ? ` (${x.vertical})` : "") }; let t = 0;
+  const pivRows = isCaller ? [] : byRev.map((x) => { const o = { n: name(x) + (lvl === "team" ? ` (${x.vertical})` : "") }; let t = 0;
     periods.forEach((p) => { const v = cell.get(x.key + "@" + p); o[p] = v ? +v[metric] : 0; t += o[p]; }); o.t = t; return o; });
+  const maxCell = Math.max(1, ...heat.flatMap((x) => periods.map((p) => +(cell.get(x.key + "@" + p)?.revenue || 0))));
 
-  // caller trends: heatmap of top 25 + line chart of chosen callers (default top 10)
-  const heat = byRev.slice(0, 25), maxCell = Math.max(1, ...heat.flatMap((x) => periods.map((p) => +(cell.get(x.key + "@" + p)?.revenue || 0))));
-  if (!S.lineKeys || !S.lineKeys.every((key) => rows.some((x) => x.key === key))) S.lineKeys = byRev.filter((x) => x.status === "current" || x.status === "resigned").slice(0, 10).map((x) => x.key);
-  const callerTrends = lvl !== "caller" ? "" : `
-    <section class="card"><div class="card-h"><h3>Caller trends${gnote ? " · by month" : ""}</h3>
-      <span class="muted small">Revenue per ${{ day: "day", part: "part of month", month: "month", fy: "financial year", week: "week" }[tg]} · the View by filter sets the periods${esc(gnote)}</span></div>
-      <div class="chips" id="chips">${S.lineKeys.map((key, i) => { const x = rows.find((y) => y.key === key);
-        return `<span class="chip"><i style="background:${palette()[i % 8]}"></i>${esc(x ? x.caller : key)}<button data-k="${esc(key)}" title="Remove">✕</button></span>`; }).join("")}
-        <input id="add-caller" list="callers-in-view" placeholder="+ Add a caller to the chart"><datalist id="callers-in-view">${byRev.slice(0, 1500).map((x) => `<option value="${esc(x.caller)}">`).join("")}</datalist></div>
-      <div class="chart-box" style="height:340px"><canvas id="ch-lines"></canvas></div></section>
-    <section class="card"><div class="card-h"><h3>Top 25 callers by period</h3><span class="muted small">Darker = more revenue · small figure = new enrolments</span></div>
+  const callerTrends = !isCaller ? "" : `
+    <section class="card"><div class="card-h"><h3>Caller trends</h3>
+      <div class="seg" id="cgrain">${Object.entries(GRAINS).map(([g, t]) => `<button data-g="${g}" class="${S.cgrain === g ? "on" : ""}">${t}</button>`).join("")}</div></div>
+      <p class="muted small" style="margin:-4px 0 12px">${S.sel.caller.size ? "The callers chosen in the Caller filter" : "The 8 biggest callers in these dates — choose callers in the Caller filter to compare others"}
+        · each colour is one ${GRAINS[tg].toLowerCase()} · number on each bar = new enrolments${esc(gnote)}</p>
+      <div class="chart-box" style="height:max(460px, 58vh)"><canvas id="ch-ctrend"></canvas></div></section>
+    <section class="card"><div class="card-h"><h3>Top 25 callers by ${GRAINS[tg].toLowerCase()}</h3><span class="muted small">Darker = more revenue · small figure = new enrolments</span></div>
       <div class="table-wrap heat">${table([{ h: "Caller", k: "caller", l: 1 }, ...periods.map((p) => ({ h: periodLabel(p, tg), f: (x) => {
           const v = cell.get(x.key + "@" + p); if (!v) return "";
           return `<span title="${full(+v.revenue)} · ${num(+v.enrolments)} new enrolments">${rupees(+v.revenue)}<small>${num(+v.enrolments)} enr</small></span>`; } })),
@@ -316,23 +328,22 @@ async function renderLevel(r, seq, page) {
       ${kpi("New enrolments", num(c.enrolments), c.enrolments, pTot.enrolments, prevText, curText)}
       ${kpi(`${page.label}s with revenue`, num(rows.filter((x) => x.revenue > 0).length), null, null, "", curText)}
     </section>
-    <section class="card"><div class="card-h"><h3>${lvl === "caller" ? "Top 15 callers" : `Revenue by ${page.label.toLowerCase()}`}</h3>
+    <section class="card"><div class="card-h"><h3>${isCaller ? "Top 15 callers" : `Revenue by ${page.label.toLowerCase()}`}</h3>
       <span class="muted small">Gold = selected dates · grey = same dates last year · label = new enrolments and change</span></div>
       <div class="chart-box" style="height:${Math.max(260, 70 + top.length * 42)}px"><canvas id="ch-rank"></canvas></div></section>
     ${callerTrends}
-    ${lvl === "caller" ? "" : `<section class="card"><div class="card-h"><h3>Trend by ${page.label.toLowerCase()}</h3>
+    ${isCaller ? "" : `<section class="card"><div class="card-h"><h3>Trend by ${page.label.toLowerCase()}</h3>
       <span class="muted small">One bar per ${page.label.toLowerCase()}${lvl === "team" ? " (10 biggest + Others)" : ""} · number on each bar = its new enrolments${esc(gnote)}</span></div>
       <div class="chart-box" style="height:400px"><canvas id="ch-trend"></canvas></div></section>`}
-    <section class="card"><div class="card-h"><h3>${lvl === "caller" ? "Caller leaderboard" : `${page.label} table`}</h3>
-      <span class="muted small">${lvl === "caller" ? "Click a caller for their trend and courses · " : ""}click a column to sort · hover an amount for the exact figure</span></div>
-      <div class="table-wrap" id="board">${table(cols, [...rows, totalRow], { sort: true, click: lvl === "caller" })}</div></section>
-    ${lvl === "caller" ? "" : `<section class="card"><div class="card-h"><h3>${page.label} by period</h3>
+    <section class="card"><div class="card-h"><h3>${isCaller ? "Caller leaderboard" : `${page.label} table`}</h3>
+      <span class="muted small">${isCaller ? "Click a caller for their trend and courses · " : ""}click a column to sort · hover an amount for the exact figure</span></div>
+      <div class="table-wrap" id="board">${table(cols, [...rows, totalRow], { sort: true, click: isCaller })}</div></section>
+    ${isCaller ? "" : `<section class="card"><div class="card-h"><h3>${page.label} by period</h3>
       <div class="seg" id="pivot-metric"><button data-m="revenue" class="${metric === "revenue" ? "on" : ""}">Revenue</button>
       <button data-m="enrolments" class="${metric === "enrolments" ? "on" : ""}">New enrolments</button></div></div>
       <div class="table-wrap">${table([{ h: page.label, k: "n", l: 1 }, ...periods.map((p) => ({ h: periodLabel(p, tg), f: (x) => pf(x[p]) })), { h: "Total", f: (x) => pf(x.t) }], pivRows)}</div></section>`}`;
 
-  // heatmap shading
-  if (lvl === "caller") document.querySelectorAll(".heat tbody tr").forEach((tr, ri) => {
+  if (isCaller) document.querySelectorAll(".heat tbody tr").forEach((tr, ri) => {
     [...tr.children].slice(1, 1 + periods.length).forEach((td, ci) => {
       const v = +(cell.get(heat[ri]?.key + "@" + periods[ci])?.revenue || 0);
       td.classList.add("cell"); if (v) td.style.background = `color-mix(in srgb, var(--gold) ${Math.round(8 + 52 * v / maxCell)}%, transparent)`;
@@ -341,7 +352,7 @@ async function renderLevel(r, seq, page) {
 
   chart("ch-rank", {
     type: "bar",
-    data: { labels: top.map((x) => lvl === "team" ? [x.team, x.vertical] : lvl === "caller" ? [x.caller, `${x.team} · ${STATUS[x.status] || ""}`] : x.vertical),
+    data: { labels: top.map((x) => lvl === "team" ? [x.team, x.vertical] : isCaller ? [x.caller, `${x.team} · ${STATUS[x.status] || ""}`] : x.vertical),
       datasets: [
         { label: "Selected dates", data: top.map((x) => x.revenue), backgroundColor: css("--gold"), borderRadius: 3, barPercentage: .9, categoryPercentage: .78 },
         { label: "Same dates last year", data: top.map((x) => x.ly_revenue), backgroundColor: css("--ly"), borderRadius: 3, barPercentage: .9, categoryPercentage: .78 },
@@ -351,37 +362,20 @@ async function renderLevel(r, seq, page) {
         tooltip: { callbacks: { label: (cc) => ` ${cc.dataset.label}: ${both(cc.raw)} · ${num(cc.datasetIndex ? top[cc.dataIndex].ly_enrolments : top[cc.dataIndex].enrolments)} enr` } } },
       scales: { x: yRupees(), y: { grid: { display: false }, ticks: { color: css("--ink") } } } },
   });
-  if (lvl !== "caller") {
+  if (!isCaller) {
     const pal = palette(), keys = [...grp.keys()].sort((a, b) => (a === "Others") - (b === "Others") || bigKeys.indexOf(a) - bigKeys.indexOf(b));
     const keyName = (key) => key === "Others" ? "Others" : (lvl === "team" ? key.split("||")[0] : key);
     const val = (key, p) => grp.get(key).get(p) || { revenue: 0, enrolments: 0 };
-    chart("ch-trend", {
-      type: "bar",
-      data: { labels: periods.map((p) => periodLabel(p, tg)),
-        datasets: keys.map((key, i) => ({ label: keyName(key), data: periods.map((p) => val(key, p).revenue),
-          backgroundColor: key === "Others" ? css("--ly") : pal[i % pal.length], borderRadius: 3, barPercentage: .92, categoryPercentage: .86, maxBarThickness: 34 })) },
-      options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 44 } },
-        plugins: { legend: { position: "bottom" },
-          barLabels: { all: keys.map((key) => periods.map((p) => (val(key, p).revenue ? num(val(key, p).enrolments) : ""))), rotate: true, size: 10, max: 400 },
-          tooltip: { mode: "index", callbacks: { label: (cc) => ` ${cc.dataset.label}: ${both(cc.raw)} · ${num(val(keys[cc.datasetIndex], periods[cc.dataIndex]).enrolments)} enr` } } },
-        scales: { x: { grid: { display: false } }, y: yRupees() } },
-    });
+    chart("ch-trend", groupedBars(periods.map((p) => periodLabel(p, tg)), keys.map((key, i) => ({ label: keyName(key),
+      color: key === "Others" ? css("--ly") : pal[i % pal.length], rev: periods.map((p) => val(key, p).revenue), enr: periods.map((p) => val(key, p).enrolments) }))));
   } else {
-    const pal = palette();
-    chart("ch-lines", {
-      type: "line",
-      data: { labels: periods.map((p) => periodLabel(p, tg)),
-        datasets: S.lineKeys.map((key, i) => { const x = rows.find((y) => y.key === key);
-          return { label: x ? x.caller : key, data: periods.map((p) => +(cell.get(key + "@" + p)?.revenue || 0)), borderColor: pal[i % 8], backgroundColor: pal[i % 8],
-            tension: .3, pointRadius: 3, borderWidth: 2 }; }) },
-      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-        plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: (cc) => { const v = cell.get(S.lineKeys[cc.datasetIndex] + "@" + periods[cc.dataIndex]);
-          return ` ${cc.dataset.label}: ${both(cc.raw)} · ${num(v ? +v.enrolments : 0)} enr`; } } } },
-        scales: { y: yRupees(), x: { grid: { display: false } } } },
-    });
-    $("chips").onclick = (e) => { const b = e.target.closest("button[data-k]"); if (b) { S.lineKeys = S.lineKeys.filter((key) => key !== b.dataset.k); render(); } };
-    $("add-caller").onchange = (e) => { const x = byRev.find((y) => y.caller === e.target.value);
-      if (x && !S.lineKeys.includes(x.key)) { S.lineKeys = [...S.lineKeys, x.key]; render(); } };
+    // one cluster per caller, one bar per period (oldest = lightest, latest = gold)
+    const tk = trendKeys.map((key) => rows.find((x) => x.key === key)).filter(Boolean);
+    const n = periods.length, gold = css("--gold");
+    const shade = (i) => n <= 1 ? gold : `color-mix(in srgb, ${gold} ${Math.round(28 + 72 * i / (n - 1))}%, ${css("--panel-2")})`;
+    chart("ch-ctrend", groupedBars(tk.map((x) => x.caller.length > 18 ? x.caller.slice(0, 17) + "…" : x.caller), periods.map((p, i) => ({ label: periodLabel(p, tg), color: shade(i),
+      rev: tk.map((x) => +(cell.get(x.key + "@" + p)?.revenue || 0)), enr: tk.map((x) => +(cell.get(x.key + "@" + p)?.enrolments || 0)) })), true));
+    $("cgrain").onclick = (e) => { const b = e.target.closest("button[data-g]"); if (b) { S.cgrain = b.dataset.g; render(); } };
   }
 
   $("board").onclick = (e) => {
@@ -394,39 +388,80 @@ async function renderLevel(r, seq, page) {
 
 /* ---------- caller drawer ---------- */
 async function openCaller(x) {
-  const r = range(), tg = r.grain === "day" && spanDays(r.from, r.to) > 62 ? "month" : r.grain;
+  const r = range(), tg = trendGrain(S.cgrain, r);
   $("d-name").textContent = x.caller;
-  $("d-sub").innerHTML = `${esc(STATUS[x.status] || x.status)} · ${esc(x.team)} · ${esc(x.vertical)}<br>${nice(r.from)} – ${nice(r.to)}, compared with ${nice(r.pf)} – ${nice(r.pt)}`;
+  $("d-sub").innerHTML = `${esc(STATUS[x.status] || x.status)} · ${esc(x.team)} · ${esc(x.vertical)}<br>${nice(r.from)} – ${nice(r.to)}, compared with ${nice(r.pf)} – ${nice(r.pt)} · by ${GRAINS[tg].toLowerCase()}`;
   $("d-kpis").innerHTML = kpi("Revenue", money(x.revenue), x.revenue, x.ly_revenue, "same dates last year") +
     kpi("New enrolments", num(x.enrolments), x.enrolments, x.ly_enrolments, "same dates last year");
   $("drawer").hidden = false;
-  const args = { p_vertical: x.vertical, p_team: x.team, p_status: x.status, p_caller: x.caller };
   const [trend, courses] = await Promise.all([
-    agg({ p_from: r.from, p_to: r.to, p_grain: tg, p_group: "none", ...args }),
-    sb.rpc("rev_courses", { p_from: r.from, p_to: r.to, p_caller: x.caller, p_vertical: x.vertical, p_team: x.team }),
+    agg({ p_from: r.from, p_to: r.to, p_grain: tg, p_group: "none", p_verticals: [x.vertical], p_teams: [x.team], p_status: x.status, p_callers: [x.caller] }),
+    sb.rpc("rev_coursesm", { p_from: r.from, p_to: r.to, p_caller: x.caller, p_verticals: [x.vertical], p_teams: [x.team] }),
   ]);
   chart("d-trend", revenueBarsConfig(trend.map((t) => periodLabel(t.period, tg)), trend.map((t) => +t.revenue), trend.map((t) => +t.enrolments)));
   $("d-courses").innerHTML = courses.error ? `<tr><td>${esc(courses.error.message)}</td></tr>` :
     table([{ h: "Course", f: (cc) => `<span style="white-space:normal">${esc(cc.course)}</span>`, l: 1 }, { h: "Revenue", f: (cc) => money(+cc.revenue) },
-      { h: "New enr.", f: (cc) => num(+cc.enrolments) }, { h: "Payments", f: (cc) => num(+cc.payments) }], courses.data).replace(/^<table>|<\/table>$/g, "");
+      { h: "New enr.", f: (cc) => num(+cc.enrolments) }], courses.data).replace(/^<table>|<\/table>$/g, "");
 }
 
-/* ---------- filters ---------- */
-function fillFilters() {
-  const v = $("f-vertical").value, t = $("f-team").value;
-  const verts = [...new Set(S.dims.map((d) => d.vertical))].filter(Boolean).sort();
-  const teams = [...new Set(S.dims.filter((d) => !v || d.vertical === v).map((d) => d.team))].filter(Boolean).sort();
-  const opt = (el, all, items, sel) => { el.innerHTML = `<option value="">${all}</option>` +
-    items.map((x) => `<option value="${esc(x)}" ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join(""); };
-  opt($("f-vertical"), "All verticals", verts, v);
-  opt($("f-team"), "All teams", teams, teams.includes(t) ? t : "");
-  const tt = $("f-team").value;
-  const callers = [...new Set(S.dims.filter((d) => (!v || d.vertical === v) && (!tt || d.team === tt)).map((d) => d.caller))].sort();
-  $("callers").innerHTML = callers.slice(0, 2000).map((cc) => `<option value="${esc(cc)}">`).join("");
+/* ---------- multi-select filters (with search) ---------- */
+const MS = {
+  vertical: { all: "All verticals", one: "vertical", opts: [] },
+  team: { all: "All teams", one: "team", opts: [] },
+  caller: { all: "All callers", one: "caller", opts: [] },
+};
+let msTimer;
+function msChanged() { clearTimeout(msTimer); msTimer = setTimeout(() => { buildOptions(); render(); }, 450); }
+function msButton(id) {
+  const set = S.sel[id], m = MS[id], b = document.querySelector(`#ms-${id} .ms-btn`); if (!b) return;
+  b.textContent = !set.size ? m.all : set.size === 1 ? [...set][0] : `${set.size} ${m.one}s selected`;
+  b.classList.toggle("on", set.size > 0); b.title = [...set].join(", ");
 }
+function msList(id) {
+  const box = document.querySelector(`#ms-${id}`), q = box.querySelector(".ms-q").value.trim().toLowerCase(), set = S.sel[id];
+  const hits = MS[id].opts.filter((o) => !q || o.value.toLowerCase().includes(q) || (o.sub || "").toLowerCase().includes(q));
+  const chosen = hits.filter((o) => set.has(o.value)), rest = hits.filter((o) => !set.has(o.value));
+  const show = [...chosen, ...rest].slice(0, 300);
+  box.querySelector(".ms-list").innerHTML = show.map((o) => `<label class="ms-item"><input type="checkbox" value="${esc(o.value)}" ${set.has(o.value) ? "checked" : ""}>
+    <span>${esc(o.value)}</span>${o.sub ? `<small>${esc(o.sub)}</small>` : ""}</label>`).join("") +
+    (hits.length > 300 ? `<div class="ms-more">${num(hits.length - 300)} more — type to narrow down</div>` : hits.length ? "" : `<div class="ms-more">No match</div>`);
+  box._hits = hits;
+}
+function msInit(id) {
+  const box = $(`ms-${id}`);
+  box.innerHTML = `<button type="button" class="ms-btn"></button><div class="ms-pop" hidden><input class="ms-q" placeholder="Search ${MS[id].one}s…">
+    <div class="ms-act"><button type="button" data-a="all">Select shown</button><button type="button" data-a="none">Clear</button></div><div class="ms-list"></div></div>`;
+  const pop = box.querySelector(".ms-pop");
+  box.querySelector(".ms-btn").onclick = () => { document.querySelectorAll(".ms-pop").forEach((p) => p !== pop && (p.hidden = true));
+    pop.hidden = !pop.hidden; if (!pop.hidden) { msList(id); box.querySelector(".ms-q").focus(); } };
+  box.querySelector(".ms-q").oninput = () => msList(id);
+  box.querySelector(".ms-list").onchange = (e) => { const v = e.target.value; e.target.checked ? S.sel[id].add(v) : S.sel[id].delete(v); msButton(id); msChanged(); };
+  box.querySelector(".ms-act").onclick = (e) => { const a = e.target.dataset.a; if (!a) return;
+    if (a === "none") S.sel[id].clear(); else (box._hits || []).slice(0, 300).forEach((o) => S.sel[id].add(o.value));
+    msList(id); msButton(id); msChanged(); };
+  msButton(id);
+}
+document.addEventListener("click", (e) => { if (!e.target.closest(".ms")) document.querySelectorAll(".ms-pop").forEach((p) => (p.hidden = true)); });
+function buildOptions() {
+  const V = S.sel.vertical, T = S.sel.team, st = $("f-status").value;
+  MS.vertical.opts = [...new Set(S.dims.map((d) => d.vertical))].filter(Boolean).sort().map((v) => ({ value: v }));
+  MS.team.opts = [...new Map(S.dims.filter((d) => d.team && (!V.size || V.has(d.vertical))).map((d) => [d.team, d.vertical]))]
+    .sort((a, b) => a[0].localeCompare(b[0])).map(([t, v]) => ({ value: t, sub: v }));
+  const cm = new Map();
+  for (const d of S.dims) {
+    if (!d.caller || (V.size && !V.has(d.vertical)) || (T.size && !T.has(d.team)) || (st && d.caller_status !== st)) continue;
+    const o = cm.get(d.caller) || { value: d.caller, team: d.team, status: d.caller_status, last: d.last_date || "", n: 0 };
+    o.n++; if ((d.last_date || "") > o.last) { o.last = d.last_date; o.team = d.team; o.status = d.caller_status; } cm.set(d.caller, o);
+  }
+  MS.caller.opts = [...cm.values()].sort((a, b) => a.value.localeCompare(b.value))
+    .map((o) => ({ value: o.value, sub: `${STATUS[o.status] || o.status} · ${o.team}${o.n > 1 ? ` +${o.n - 1}` : ""}${o.last ? ` · last ${short(o.last)}` : ""}` }));
+  for (const id of Object.keys(MS)) { msButton(id); const box = $(`ms-${id}`); if (box && !box.querySelector(".ms-pop").hidden) msList(id); }
+}
+
+/* ---------- other filters ---------- */
 function showFilters() {
   document.querySelector(".filters").hidden = S.page === "overall";   // Overall always shows every year
-  document.querySelectorAll(".filter-row label[data-for]").forEach((l) => { l.hidden = !l.dataset.for.split(" ").includes(S.page); });
+  document.querySelectorAll(".filter-row [data-for]").forEach((l) => { l.hidden = !l.dataset.for.split(" ").includes(S.page); });
 }
 function fillFy() {
   const cur = +fyStart(istToday()).slice(0, 4);
@@ -437,7 +472,7 @@ function setPreset(p) { const [f, t, g] = preset(p); $("from").value = f; $("to"
 function setFy(y) { const t = istToday(), end = `${+y + 1}-03-31`; $("from").value = `${y}-04-01`; $("to").value = end < t ? end : t; $("grain").value = "month"; markPreset(null); render(); }
 function setPage(p) {
   if (!PAGES[p]) p = "overall";
-  S.page = p; S.sort = { k: "revenue", dir: -1 }; S.lineKeys = null;
+  S.page = p; S.sort = { k: "revenue", dir: -1 };
   $("page-title").textContent = PAGES[p].title; document.title = `${PAGES[p].title} · Sales Analytics Dashboard`;
   document.querySelectorAll(".side nav a").forEach((a) => a.classList.toggle("on", a.dataset.page === p));
   $("side").classList.remove("open"); $("drawer").hidden = true;
@@ -483,7 +518,7 @@ $("theme").addEventListener("click", () => {
 });
 
 /* ---------- auth + start ---------- */
-async function loadDims() { try { S.dims = await rpcJson("rev_dims_json", {}); fillFilters(); } catch (_) {} }
+async function loadDims() { try { S.dims = await rpcJson("rev_dims_json", {}); buildOptions(); } catch (_) {} }
 async function start() {
   themeButton();
   const { data: { session } } = await sb.auth.getSession();
@@ -492,7 +527,7 @@ async function start() {
   if (!ok) { $("auth").hidden = false; $("app").hidden = true;
     $("auth-msg").textContent = `${session.user.email} is signed in but not on the allowed list. Ask Amit to add it.`; return; }
   $("auth").hidden = true; $("app").hidden = false;
-  fillFy();
+  fillFy(); Object.keys(MS).forEach(msInit);
   const [f, t, g] = preset("month"); $("from").value = f; $("to").value = t; $("grain").value = g; markPreset("month");
   setPage(location.hash.slice(1));
   lastRun().then(showFresh); loadDims();   // in the background: never delay the first page
@@ -516,9 +551,7 @@ document.querySelectorAll("#presets button").forEach((b) => b.addEventListener("
 $("fy").addEventListener("change", (e) => { if (e.target.value) setFy(e.target.value); });
 ["from", "to"].forEach((id) => $(id).addEventListener("change", () => { $("fy").value = ""; markPreset(null); render(); }));
 $("grain").addEventListener("change", render);
-["f-vertical", "f-team"].forEach((id) => $(id).addEventListener("change", () => { fillFilters(); S.lineKeys = null; render(); }));
-$("f-status").addEventListener("change", () => { S.lineKeys = null; render(); });
-let typing; $("f-caller").addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(() => { S.lineKeys = null; render(); }, 350); });
+$("f-status").addEventListener("change", () => { buildOptions(); render(); });
 $("update").addEventListener("click", update);
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
 $("menu").addEventListener("click", () => {

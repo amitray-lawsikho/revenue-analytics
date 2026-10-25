@@ -20,7 +20,7 @@
       <p class="eyebrow">LawSikho · Skill Arbitrage</p>
       <h1 class="auth-title">Sales Analytics</h1>
       <div class="rule"><span></span><i>◆</i><span></span></div>
-      <p class="auth-lead">Revenue and enrolments across every financial year, vertical, team and caller — refreshed five times a day.</p>
+      <p class="auth-lead">Revenue and enrolments across every financial year, vertical, team and caller.</p>
       <ul class="auth-points">
         <li><b>Overall</b> every year, month and part of month, side by side</li>
         <li><b>Verticals &amp; teams</b> credited to each caller's current team</li>
@@ -86,14 +86,14 @@
           <label>Financial year <select id="fy"><option value="">Custom dates</option></select></label>
           <label>From <input type="date" id="from"></label>
           <label>To <input type="date" id="to"></label>
-          <label>View by <select id="grain"><option value="day">Day</option><option value="part">Part of month (1–10, 11–20, 21–end)</option>
+          <label data-for="vertical team">View by <select id="grain"><option value="day">Day</option><option value="part">Part of month (1–10, 11–20, 21–end)</option>
             <option value="month">Month</option><option value="fy">Financial year</option></select></label>
-          <label data-for="vertical team caller">Vertical <select id="f-vertical"><option value="">All verticals</option></select></label>
-          <label data-for="team caller">Team <select id="f-team"><option value="">All teams</option></select></label>
+          <div class="lbl" data-for="vertical team caller"><span>Vertical</span><div class="ms" id="ms-vertical"></div></div>
+          <div class="lbl" data-for="team caller"><span>Team</span><div class="ms" id="ms-team"></div></div>
           <label data-for="caller">Caller type <select id="f-status">
             <option value="">All</option><option value="current">Current callers</option><option value="resigned">Resigned / not in Teamlist</option>
             <option value="direct">Direct</option><option value="no caller">Lead details not available</option></select></label>
-          <label data-for="caller">Caller <input id="f-caller" list="callers" placeholder="Search a name"><datalist id="callers"></datalist></label>
+          <div class="lbl" data-for="caller"><span>Caller</span><div class="ms" id="ms-caller"></div></div>
         </div>
       </section>
 
