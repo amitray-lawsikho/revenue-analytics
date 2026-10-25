@@ -225,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         store.delete("roster", f"updated_at=lt.{started}")
         store.upsert("revenue_txn", rev, "id")
         store.delete("revenue_txn", f"load_id=neq.{load_id}" if full else f"sheet=eq.{C.COMBINED_TAB}&load_id=neq.{load_id}")
+        detail["summary_rows"] = store.rpc("rebuild_rev_daily")  # the dashboard reads this daily summary
         store.upsert("calls_daily", calls, "call_date,email,dialler")
         if full:
             store.delete("unmapped_names", "rows=gte.0")

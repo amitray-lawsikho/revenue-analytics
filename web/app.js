@@ -137,62 +137,117 @@ function setSub() {
 }
 
 async function render() {
-  const r = range(); if (!r.from || !r.to || r.from > r.to) return;
   const seq = ++S.seq;
-  setSub(); $("content").classList.add("loading");
+  $("content").classList.add("loading");
   try {
-    if (S.page === "overall") await renderOverall(r, seq);
-    else await renderLevel(r, seq, PAGES[S.page]);
+    if (S.page === "overall") await renderOverall(seq);
+    else { const r = range(); if (!r.from || !r.to || r.from > r.to) return; setSub(); await renderLevel(r, seq, PAGES[S.page]); }
   } catch (e) { if (seq === S.seq) $("content").innerHTML = `<div class="card empty">Could not load data: ${esc(e.message || e)}</div>`; }
   $("content").classList.remove("loading");
 }
 
-/* ---------- Overall ---------- */
-async function renderOverall(r, seq) {
-  const [cur, ly, fys] = await Promise.all([
-    rpcAll("rev_agg", { p_from: r.from, p_to: r.to, p_grain: r.grain, p_group: "none" }),
-    rpcAll("rev_agg", { p_from: r.pf, p_to: r.pt, p_grain: r.grain, p_group: "none" }),
-    rpcAll("rev_agg", { p_from: "2023-04-01", p_to: istToday(), p_grain: "fy", p_group: "none" }),
-  ]);
-  if (seq !== S.seq) return;
-  const c = tot(cur), p = tot(ly), prevText = `${nice(r.pf)} – ${nice(r.pt)}`;
-  const lyBy = new Map(ly.map((x) => [x.period, x]));
-  const rows = cur.map((x) => { const l = lyBy.get(lyKey(x.period, r.grain)) || {};
-    return { period: x.period, label: periodLabel(x.period, r.grain), revenue: +x.revenue, enrolments: +x.enrolments, payments: +x.payments,
-      ly_revenue: l.revenue != null ? +l.revenue : null, ly_enrolments: l.enrolments != null ? +l.enrolments : null }; });
-  const fyRows = fys.map((x, i) => ({ label: periodLabel(x.period, "fy"), revenue: +x.revenue, enrolments: +x.enrolments, payments: +x.payments,
-    growth: i ? change(+x.revenue, +fys[i - 1].revenue) : null }));
+/* ---------- Overall: all years, current FY by month, current month in 3 parts ---------- */
+const MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+const fyOf = (s) => +fyStart(s).slice(0, 4);
+const fyName = (y) => `FY ${y}-${String(y + 1).slice(2)}`;
+const partOf = (day) => (day <= 10 ? 0 : day <= 20 ? 1 : 2);
+const PARTS = ["1–10", "11–20", "21–end"];
+const fyColors = (n) => { const base = [css("--ly"), css("--c2"), css("--c3"), css("--c4"), css("--c5")]; const out = [];
+  for (let i = 0; i < n; i++) out.push(i === n - 1 ? css("--accent") : base[(n - 2 - i) % base.length]); return out; };
 
+async function renderOverall(seq) {
+  const today = istToday();
+  const days = await rpcAll("rev_agg", { p_from: "2023-04-01", p_to: today, p_grain: "day", p_group: "none" });
+  if (seq !== S.seq) return;
+  const curFy = fyOf(today), fys = [...new Set(days.map((d) => fyOf(d.period)))].sort();
+  if (!fys.includes(curFy)) fys.push(curFy);
+  const md = today.slice(5);                       // "10-25": same dates in each FY = 1 Apr .. this calendar day
+  const curMonth = +today.slice(5, 7), curDay = +today.slice(8, 10), mIdx = (curMonth + 8) % 12;
+  const fy = new Map(fys.map((y) => [y, { y, revenue: 0, enrolments: 0, payments: 0, ytdRev: 0, ytdEnr: 0, mtdRev: 0, partRev: 0, months: MONTHS.map(() => ({ revenue: 0, enrolments: 0 })) }]));
+  const parts = new Map(fys.map((y) => [y, PARTS.map(() => ({ revenue: 0, enrolments: 0 }))]));
+  for (const d of days) {
+    const y = fyOf(d.period), o = fy.get(y), rev = +d.revenue, enr = +d.enrolments;
+    o.revenue += rev; o.enrolments += enr; o.payments += +d.payments;
+    const m = +d.period.slice(5, 7), mi = (m + 8) % 12;
+    o.months[mi].revenue += rev; o.months[mi].enrolments += enr;
+    // year-to-date: same position in the FY as today (month index before today's, or same month up to today's day)
+    if (mi < mIdx || (mi === mIdx && +d.period.slice(8, 10) <= curDay)) { o.ytdRev += rev; o.ytdEnr += enr; }
+    if (m === curMonth) { const day = +d.period.slice(8, 10), p = parts.get(y)[partOf(day)]; p.revenue += rev; p.enrolments += enr;
+      if (day <= curDay) { o.mtdRev += rev; if (partOf(day) === partOf(curDay)) o.partRev += rev; } }  // same days as today
+  }
+  const list = fys.map((y) => fy.get(y));
+  const cur = fy.get(curFy), prev = fy.get(curFy - 1) || { ytdRev: 0, ytdEnr: 0 };
+  const allRev = list.reduce((a, x) => a + x.revenue, 0), allEnr = list.reduce((a, x) => a + x.enrolments, 0);
+  const sameLabel = `1 Apr – ${D(today).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}`;
+  const monthName = D(today).toLocaleDateString("en-IN", { month: "long", timeZone: "UTC" });
+  const monthYear = (y) => (curMonth >= 4 ? y : y + 1);   // calendar year of this month inside FY y
+  const lastDay = new Date(Date.UTC(+today.slice(0, 4), curMonth, 0)).getUTCDate();
+
+  $("page-sub").innerHTML = `All payments, every financial year · comparisons use the same dates in earlier years`;
   $("content").innerHTML = `
     <section class="kpis">
-      ${kpi("Revenue (Fee paid)", rupees(c.revenue), c.revenue, p.revenue, prevText)}
-      ${kpi("New enrolments", num(c.enrolments), c.enrolments, p.enrolments, prevText)}
+      <div class="kpi"><div class="k">Revenue, all years</div><div class="v num">${rupees(allRev)}</div><div class="d">${fyName(fys[0])} to today</div></div>
+      <div class="kpi"><div class="k">New enrolments, all years</div><div class="v num">${num(allEnr)}</div><div class="d">${fyName(fys[0])} to today</div></div>
+      ${kpi(`Revenue ${fyName(curFy)} so far`, rupees(cur.ytdRev), cur.ytdRev, prev.ytdRev, `${sameLabel} ${curFy - 1}-${String(curFy).slice(2)}`)}
+      ${kpi(`New enrolments ${fyName(curFy)} so far`, num(cur.ytdEnr), cur.ytdEnr, prev.ytdEnr, `${sameLabel} ${curFy - 1}-${String(curFy).slice(2)}`)}
     </section>
-    <section class="card"><div class="card-h"><h3>Revenue by ${{ day: "day", week: "week", month: "month", fy: "financial year" }[r.grain]}</h3>
-      <span class="muted small">Bar = revenue · label = new enrolments</span></div>
-      <div class="chart-box"><canvas id="ch-main"></canvas></div></section>
-    <section class="card"><div class="card-h"><h3>Data by period</h3><span class="muted small">Last year = the same period one year earlier</span></div>
-      <div class="table-wrap">${table([
-        { h: "Period", k: "label", l: 1 }, { h: "Revenue", f: (x) => rupees(x.revenue) }, { h: "New enrolments", f: (x) => num(x.enrolments) },
-        { h: "Payments", f: (x) => num(x.payments) }, { h: "Revenue last year", f: (x) => rupees(x.ly_revenue) },
-        { h: "Enrolments last year", f: (x) => num(x.ly_enrolments) }, { h: "Revenue change", f: (x) => chHtml(change(x.revenue, x.ly_revenue)) },
-      ], [...rows, { _total: 1, label: "Total", revenue: c.revenue, enrolments: c.enrolments, payments: c.payments, ly_revenue: p.revenue, ly_enrolments: p.enrolments }])}</div></section>
+
     <section class="grid2">
-      <div class="card"><div class="card-h"><h3>Every financial year</h3><span class="muted small">All data, not affected by the dates above</span></div>
+      <div class="card"><div class="card-h"><h3>Revenue by financial year</h3><span class="muted small">Label = new enrolments · ${fyName(curFy)} is in progress</span></div>
         <div class="chart-box"><canvas id="ch-fy"></canvas></div></div>
-      <div class="card"><h3>Financial year summary</h3><div class="table-wrap">${table([
-        { h: "Financial year", k: "label", l: 1 }, { h: "Revenue", f: (x) => rupees(x.revenue) }, { h: "New enrolments", f: (x) => num(x.enrolments) },
-        { h: "Payments", f: (x) => num(x.payments) }, { h: "Growth vs previous FY", f: (x) => chHtml(x.growth) }], fyRows)}</div>
-        <p class="note">The current financial year is still in progress.</p></div>
-    </section>`;
-  chart("ch-main", revenueBarsConfig(rows.map((x) => x.label), rows.map((x) => x.revenue), rows.map((x) => x.enrolments),
-    (i) => rows[i].ly_revenue != null ? `\n Last year ${rupees(rows[i].ly_revenue)} · ${num(rows[i].ly_enrolments)} enr` : ""));
-  chart("ch-fy", revenueBarsConfig(fyRows.map((x) => x.label), fyRows.map((x) => x.revenue), fyRows.map((x) => x.enrolments)));
+      <div class="card"><div class="card-h"><h3>Financial years compared</h3><span class="muted small">"Same dates" = ${sameLabel} of each year</span></div>
+        <div class="table-wrap">${table([
+          { h: "Financial year", k: "n", l: 1 }, { h: "Revenue", f: (x) => rupees(x.revenue) }, { h: "New enrolments", f: (x) => num(x.enrolments) },
+          { h: "Growth", f: (x) => chHtml(x.g) }, { h: `Revenue ${sameLabel}`, f: (x) => rupees(x.ytdRev) }, { h: `Enrolments ${sameLabel}`, f: (x) => num(x.ytdEnr) },
+          { h: "Growth (same dates)", f: (x) => chHtml(x.gs) }],
+          list.map((x, i) => ({ ...x, n: fyName(x.y), g: i && x.y !== curFy ? change(x.revenue, list[i - 1].revenue) : null, gs: i ? change(x.ytdRev, list[i - 1].ytdRev) : null })))}</div>
+        <p class="note">Full-year growth is left blank for ${fyName(curFy)} until the year ends; use the same-dates columns.</p></div>
+    </section>
+
+    <section class="card"><div class="card-h"><h3>${fyName(curFy)} month by month, compared with earlier years</h3>
+      <span class="muted small">Orange = ${fyName(curFy)} (label = its new enrolments) · other colours = earlier years</span></div>
+      <div class="chart-box" style="height:360px"><canvas id="ch-month"></canvas></div>
+      <div class="table-wrap" style="margin-top:12px">${table([{ h: "Month", k: "m", l: 1 },
+        ...fys.flatMap((y) => [{ h: `${fyName(y)} revenue`, f: (x) => y === curFy && x.i > mIdx ? "–" : rupees(x[y].revenue) },
+          { h: `${fyName(y)} enr.`, f: (x) => y === curFy && x.i > mIdx ? "–" : num(x[y].enrolments) }]),
+        { h: `Change vs ${fyName(curFy - 1)}`, f: (x) => x.i < mIdx ? chHtml(change(x[curFy].revenue, (x[curFy - 1] || {}).revenue))
+          : x.i === mIdx ? chHtml(change(cur.mtdRev, (fy.get(curFy - 1) || {}).mtdRev)) + ` <span class="muted small">(1–${curDay})</span>` : "" }],
+        MONTHS.map((m, i) => { const o = { m, i }; fys.forEach((y) => (o[y] = fy.get(y).months[i])); return o; }))}</div>
+      <p class="note">${MONTHS[mIdx]} ${fyName(curFy)} is still in progress: its change compares days 1–${curDay} with days 1–${curDay} of ${MONTHS[mIdx]} last year. The chart shows earlier years' full months.</p></section>
+
+    <section class="card"><div class="card-h"><h3>${monthName} in three parts, compared with ${monthName} of earlier years</h3>
+      <span class="muted small">Parts: days 1–10, 11–20, 21–${lastDay} · orange = ${monthName} ${monthYear(curFy)}</span></div>
+      <div class="chart-box"><canvas id="ch-parts"></canvas></div>
+      <div class="table-wrap" style="margin-top:12px">${table([{ h: "Part of month", k: "p", l: 1 },
+        ...fys.flatMap((y) => [{ h: `${monthName.slice(0, 3)} ${monthYear(y)} revenue`, f: (x) => y === curFy && x.i > partOf(curDay) ? "–" : rupees(x[y].revenue) },
+          { h: `${monthName.slice(0, 3)} ${monthYear(y)} enr.`, f: (x) => y === curFy && x.i > partOf(curDay) ? "–" : num(x[y].enrolments) }]),
+        { h: `Change vs ${monthName.slice(0, 3)} ${monthYear(curFy - 1)}`, f: (x) => x.i < partOf(curDay) ? chHtml(change(x[curFy].revenue, (x[curFy - 1] || {}).revenue))
+          : x.i === partOf(curDay) ? chHtml(change(cur.partRev, (fy.get(curFy - 1) || {}).partRev)) + ` <span class="muted small">(to day ${curDay})</span>` : "" }],
+        PARTS.map((p, i) => { const o = { p: `Days ${p}`, i }; fys.forEach((y) => (o[y] = parts.get(y)[i])); return o; }))}</div>
+      <p class="note">Days ${PARTS[partOf(curDay)]} of ${monthName} ${monthYear(curFy)} are still in progress (today is day ${curDay}); its change compares up to day ${curDay} with the same days last year.</p></section>`;
+
+  chart("ch-fy", revenueBarsConfig(list.map((x) => fyName(x.y)), list.map((x) => x.revenue), list.map((x) => x.enrolments)));
+  const cols = fyColors(fys.length);
+  const grouped = (labels, valsByFy, enrCur, tipEnr) => ({
+    type: "bar",
+    data: { labels, datasets: fys.map((y, i) => ({ label: fyName(y), data: valsByFy(y), backgroundColor: cols[i], borderRadius: 4, barPercentage: .92, categoryPercentage: .82 })) },
+    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 20 } },
+      plugins: { legend: { position: "bottom" }, barLabels: { dataset: fys.length - 1, labels: enrCur, max: 60 },
+        tooltip: { mode: "index", callbacks: { label: (c) => ` ${c.dataset.label}: ${rupees(c.raw)} · ${num(tipEnr(fys[c.datasetIndex], c.dataIndex))} enr` } } },
+      scales: { y: yRupees(), x: { grid: { display: false } } } },
+  });
+  chart("ch-month", grouped(MONTHS, (y) => fy.get(y).months.map((m, i) => (y === curFy && i > mIdx ? null : m.revenue)),
+    cur.months.map((m, i) => (i <= mIdx ? `${num(m.enrolments)}` : "")), (y, i) => fy.get(y).months[i].enrolments));
+  chart("ch-parts", grouped(PARTS.map((p) => `Days ${p}`), (y) => parts.get(y).map((p, i) => (y === curFy && i > partOf(curDay) ? null : p.revenue)),
+    parts.get(curFy).map((p, i) => (i <= partOf(curDay) ? `${num(p.enrolments)} enr` : "")), (y, i) => parts.get(y)[i].enrolments));
+
   S.export = [
-    { name: "By period", rows: rows.map((x) => ({ Period: x.label, "Start date": x.period, Revenue: x.revenue, "New enrolments": x.enrolments,
-      Payments: x.payments, "Revenue last year": x.ly_revenue, "Enrolments last year": x.ly_enrolments })) },
-    { name: "Financial years", rows: fyRows.map((x) => ({ "Financial year": x.label, Revenue: x.revenue, "New enrolments": x.enrolments, Payments: x.payments,
-      "Growth vs previous FY": x.growth })) },
+    { name: "Financial years", rows: list.map((x, i) => ({ "Financial year": fyName(x.y), Revenue: x.revenue, "New enrolments": x.enrolments, Payments: x.payments,
+      [`Revenue ${sameLabel}`]: x.ytdRev, [`Enrolments ${sameLabel}`]: x.ytdEnr })) },
+    { name: `${fyName(curFy)} by month`, rows: MONTHS.map((m, i) => Object.assign({ Month: m },
+      ...fys.map((y) => ({ [`${fyName(y)} revenue`]: fy.get(y).months[i].revenue, [`${fyName(y)} enrolments`]: fy.get(y).months[i].enrolments })))) },
+    { name: `${monthName} in 3 parts`, rows: PARTS.map((p, i) => Object.assign({ Part: `Days ${p}` },
+      ...fys.map((y) => ({ [`${monthName} ${monthYear(y)} revenue`]: parts.get(y)[i].revenue, [`${monthName} ${monthYear(y)} enrolments`]: parts.get(y)[i].enrolments })))) },
   ];
 }
 
@@ -345,6 +400,7 @@ function fillFilters() {
   $("callers").innerHTML = callers.slice(0, 2000).map((c) => `<option value="${esc(c)}">`).join("");
 }
 function showFilters() {
+  document.querySelector(".filters").hidden = S.page === "overall";   // Overall always shows every year: no filters
   document.querySelectorAll(".filter-row label[data-for]").forEach((l) => { l.hidden = !l.dataset.for.split(" ").includes(S.page); });
 }
 function fillFy() {
@@ -370,6 +426,7 @@ function download() {
   const r = range(), wb = XLSX.utils.book_new();
   const info = [{ Item: "Page", Value: PAGES[S.page].title }, { Item: "From", Value: r.from }, { Item: "To", Value: r.to },
     { Item: "Compared with", Value: `${r.pf} to ${r.pt} (same dates last year)` }, { Item: "View by", Value: r.grain }];
+  if (S.page === "overall") info.splice(1, 4, { Item: "Data", Value: "All payments, every financial year; same dates compared across years" });
   if (S.page !== "overall") info.push({ Item: "Vertical", Value: $("f-vertical").value || "All" });
   if (S.page === "team" || S.page === "caller") info.push({ Item: "Team", Value: $("f-team").value || "All" });
   if (S.page === "caller") info.push({ Item: "Caller type", Value: $("f-status").value || "All" }, { Item: "Caller search", Value: $("f-caller").value || "" });
@@ -454,9 +511,13 @@ $("grain").addEventListener("change", render);
 ["f-vertical", "f-team"].forEach((id) => $(id).addEventListener("change", () => { fillFilters(); render(); }));
 $("f-status").addEventListener("change", render);
 let typing; $("f-caller").addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(render, 350); });
-$("download").addEventListener("click", download);
 $("update").addEventListener("click", update);
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
-$("menu").addEventListener("click", () => $("side").classList.toggle("open"));
+$("menu").addEventListener("click", () => {
+  if (matchMedia("(max-width: 820px)").matches) { $("side").classList.toggle("open"); return; }
+  const c = $("app").classList.toggle("collapsed"); try { localStorage.setItem("sa-side", c ? "hidden" : "shown"); } catch (_) {}
+  setTimeout(() => Object.values(S.charts).forEach((ch) => ch.resize()), 50);
+});
+try { if (localStorage.getItem("sa-side") === "hidden") $("app").classList.add("collapsed"); } catch (_) {}
 
 start();

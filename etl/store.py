@@ -40,5 +40,8 @@ class Store:
     def delete(self, table: str, filter_: str) -> None:
         self._call("DELETE", f"{table}?{filter_}", headers={"Prefer": "return=minimal"})
 
+    def rpc(self, fn: str, args: dict | None = None):
+        return self._call("POST", f"rpc/{fn}", data=json.dumps(args or {})).json()
+
     def insert(self, table: str, rows: list[dict]) -> None:
         self._call("POST", table, headers={"Prefer": "return=minimal"}, data=json.dumps(rows, default=str))

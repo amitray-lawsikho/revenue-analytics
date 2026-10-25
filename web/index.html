@@ -10,7 +10,6 @@
   <script>try { const t = localStorage.getItem("sa-theme"); if (t) document.documentElement.dataset.theme = t; } catch (_) {}</script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="config.js"></script>
 </head>
 <body>
@@ -47,17 +46,17 @@
           <button id="theme" class="btn ghost sm"></button>
           <button id="signout" class="btn ghost sm">Sign out</button>
         </div>
+        <div class="credit">Designed and developed by Amit Ray<br><a href="mailto:amitray@lawsikho.in">amitray@lawsikho.in</a></div>
       </div>
     </aside>
 
     <main class="main">
       <header class="page-h">
-        <button id="menu" class="btn ghost sm menu-btn" aria-label="Menu">☰</button>
+        <button id="menu" class="btn ghost sm" title="Show / hide the sidebar" aria-label="Show or hide the sidebar"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <div>
           <h1 id="page-title">Overall Performance</h1>
           <p id="page-sub" class="muted small"></p>
         </div>
-        <button id="download" class="btn sm"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>Download Excel</button>
       </header>
 
       <section class="filters card">
