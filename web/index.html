@@ -1,21 +1,23 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Counsellor Performance</title>
+  <title>Sales Analytics Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script>try { const t = localStorage.getItem("sa-theme"); if (t) document.documentElement.dataset.theme = t; } catch (_) {}</script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="config.js"></script>
 </head>
 <body>
   <!-- Sign in -->
   <section id="auth" class="auth" hidden>
     <div class="auth-card">
-      <div class="brand"><span class="logo">CP</span> Counsellor Performance</div>
+      <div class="brand"><span class="logo">SA</span><span>Sales Analytics Dashboard</span></div>
       <p class="muted">Sign in with your work email. Only approved emails can see data.</p>
       <form id="auth-form">
         <label>Email <input id="auth-email" type="email" autocomplete="username" required></label>
@@ -27,98 +29,67 @@
     </div>
   </section>
 
-  <!-- App -->
-  <div id="app" hidden>
-    <header class="top">
-      <div class="brand"><span class="logo">CP</span> Counsellor Performance</div>
-      <div class="top-right">
-        <span id="fresh" class="chip">Loading…</span>
-        <button id="theme" class="icon-btn" title="Light / dark">Theme</button>
-        <button id="signout" class="btn ghost sm">Sign out</button>
+  <div id="app" class="shell" hidden>
+    <aside class="side" id="side">
+      <div class="brand"><span class="logo">SA</span><span>Sales Analytics<br><small>Dashboard</small></span></div>
+      <nav>
+        <div class="nav-h">Revenue Metrics</div>
+        <a href="#overall" data-page="overall"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15l4-4 3 3 5-6"/></svg>Overall Performance</a>
+        <a href="#vertical" data-page="vertical"><svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h18"/></svg>Vertical Wise Performance</a>
+        <a href="#team" data-page="team"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19c1-3 3-4 5-4s4 1 5 4M11 19c1-3 3-4 5-4s4 1 5 4"/></svg>Teamwise Performance</a>
+        <a href="#caller" data-page="caller"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-4 4-5.5 7-5.5s5.8 1.5 7 5.5"/></svg>Caller Wise Performance</a>
+      </nav>
+      <div class="side-foot">
+        <button id="update" class="btn primary block"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg>Update data</button>
+        <div id="update-msg" class="small muted"></div>
+        <div id="fresh" class="small muted"></div>
+        <div class="side-row">
+          <button id="theme" class="btn ghost sm"></button>
+          <button id="signout" class="btn ghost sm">Sign out</button>
+        </div>
       </div>
-    </header>
+    </aside>
 
-    <section class="filters">
-      <div class="seg" id="presets">
-        <button data-p="today">Today</button><button data-p="yesterday">Yesterday</button>
-        <button data-p="week">This week</button><button data-p="month" class="on">This month</button>
-        <button data-p="lastmonth">Last month</button><button data-p="all">All years</button>
-      </div>
-      <div class="filter-row">
-        <label>Financial year <select id="fy"><option value="">Custom dates</option></select></label>
-        <label>From <input type="date" id="from"></label>
-        <label>To <input type="date" id="to"></label>
-        <label>View by
-          <select id="grain"><option value="day">Day</option><option value="week">Week</option>
-            <option value="month" selected>Month</option><option value="fy">Financial year</option></select>
-        </label>
-        <label>Vertical <select id="f-vertical"><option value="">All three</option></select></label>
-        <label>Team <select id="f-team"><option value="">All teams</option></select></label>
-        <label>Counsellor <select id="f-person"><option value="">All counsellors</option></select></label>
-      </div>
-    </section>
-
-    <main>
-      <section class="kpis" id="kpis"></section>
-
-      <section class="grid2">
-        <div class="card">
-          <div class="card-h"><h2>Revenue and new enrolments</h2><span class="muted" id="trend-note"></span></div>
-          <div class="chart-box"><canvas id="trend"></canvas></div>
+    <main class="main">
+      <header class="page-h">
+        <button id="menu" class="btn ghost sm menu-btn" aria-label="Menu">☰</button>
+        <div>
+          <h1 id="page-title">Overall Performance</h1>
+          <p id="page-sub" class="muted small"></p>
         </div>
-        <div class="card">
-          <div class="card-h"><h2>By vertical</h2></div>
-          <div class="chart-box"><canvas id="byvert"></canvas></div>
+        <button id="download" class="btn sm"><svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>Download Excel</button>
+      </header>
+
+      <section class="filters card">
+        <div class="seg" id="presets">
+          <button data-p="today">Today</button><button data-p="yesterday">Yesterday</button>
+          <button data-p="week">This week</button><button data-p="month">This month</button>
+          <button data-p="lastmonth">Last month</button><button data-p="all">All years</button>
+        </div>
+        <div class="filter-row">
+          <label>Financial year <select id="fy"><option value="">Custom dates</option></select></label>
+          <label>From <input type="date" id="from"></label>
+          <label>To <input type="date" id="to"></label>
+          <label>View by <select id="grain"><option value="day">Day</option><option value="week">Week</option>
+            <option value="month">Month</option><option value="fy">Financial year</option></select></label>
+          <label data-for="vertical team caller">Vertical <select id="f-vertical"><option value="">All verticals</option></select></label>
+          <label data-for="team caller">Team <select id="f-team"><option value="">All teams</option></select></label>
+          <label data-for="caller">Caller type <select id="f-status">
+            <option value="">All</option><option value="current">Current callers</option><option value="resigned">Resigned / not in Teamlist</option>
+            <option value="direct">Direct</option><option value="no caller">Lead details not available</option></select></label>
+          <label data-for="caller">Caller <input id="f-caller" list="callers" placeholder="Search a name"><datalist id="callers"></datalist></label>
         </div>
       </section>
 
-      <section class="card">
-        <div class="card-h">
-          <div><h2>Revenue comparison</h2><p class="muted small" id="cmp-sub" style="margin:2px 0 0"></p></div>
-          <div class="cmp-ctl">
-            <div class="seg sm" id="cmp-level"><button data-l="vertical" class="on">Verticals</button><button data-l="team">Teams</button></div>
-            <div class="seg sm" id="cmp-metric"><button data-m="revenue" class="on">Revenue</button><button data-m="new_enrolments">New enrolments</button></div>
-          </div>
-        </div>
-        <div class="chart-box" id="cmp-box"><canvas id="cmp-chart"></canvas></div>
-        <div class="table-wrap"><table id="cmp-table"></table></div>
-        <p class="muted small">Chart: each vertical or team in the selected dates against the same number of days just before. Table: one column per period of the "View by" choice; "Change" compares the last two columns (the last one may still be in progress).</p>
-      </section>
-
-      <section class="card">
-        <div class="card-h">
-          <h2>Leaderboard</h2>
-          <div class="seg sm" id="level">
-            <button data-l="vertical">Verticals</button><button data-l="team">Teams</button>
-            <button data-l="person" class="on">Counsellors</button>
-          </div>
-        </div>
-        <div class="table-wrap"><table id="board"></table></div>
-        <p class="muted small">Click a counsellor for their own trend and course mix. Column headers sort.</p>
-      </section>
-
-      <section class="card" id="unmapped-card" hidden>
-        <details>
-          <summary><h2>Names not matched to Teamlist</h2> <span id="unmapped-count" class="chip warn"></span></summary>
-          <p class="muted small">These rows are not credited to anyone. Fix the spelling in the sheet or add an alias.</p>
-          <div class="table-wrap"><table id="unmapped"></table></div>
-        </details>
-      </section>
-
-      <footer class="muted small">
-        Revenue = Fee paid. New enrolment = Enrollment "New enrollment"; balance payments add revenue only.
-        Teams and verticals are each counsellor's current Teamlist team, for all history. Times in IST.
-      </footer>
+      <div id="content"></div>
     </main>
 
-    <!-- Counsellor drawer -->
     <aside id="drawer" class="drawer" hidden>
-      <div class="drawer-h"><h2 id="d-name"></h2><button id="d-close" class="icon-btn">✕</button></div>
-      <p id="d-sub" class="muted"></p>
-      <div class="kpis small" id="d-kpis"></div>
-      <div class="chart-box"><canvas id="d-trend"></canvas></div>
-      <h3>Top courses</h3>
-      <div class="table-wrap"><table id="d-courses"></table></div>
+      <div class="drawer-h"><h2 id="d-name"></h2><button id="d-close" class="btn ghost sm">✕</button></div>
+      <p id="d-sub" class="muted small"></p>
+      <div class="kpis" id="d-kpis"></div>
+      <div class="card"><h3>Revenue and new enrolments</h3><div class="chart-box"><canvas id="d-trend"></canvas></div></div>
+      <div class="card"><h3>Top courses</h3><div class="table-wrap"><table id="d-courses"></table></div></div>
     </aside>
   </div>
   <script src="app.js"></script>

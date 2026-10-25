@@ -1,17 +1,18 @@
-# Counsellor Performance
+# Sales Analytics Dashboard
 
-Revenue, new enrolments and calling per counsellor, team and vertical (Team Uzair, Team Darshan, Team Deepanshi),
-by day, week, month and financial year. Rules: [docs/definitions.md](docs/definitions.md) (never change without Amit's OK).
+Revenue Metrics (overall, vertical, team, caller) for all LawSikho / Skill Arbitrage payments; calling is collected but hidden for now;
+by day, week, month and financial year, compared with the same dates last year. Rules: [docs/definitions.md](docs/definitions.md) (never change without Amit's OK).
 
 ## How it runs
 - `etl/refresh.py`: Google Sheets (Teamlist, Combined, Consolidated FY tabs) + BigQuery calling tables
   (`studious-apex-488820-c3.crm_dashboard`: acefone_calls, mcube_calls, ozonetel_calls, manual_calls) -> Supabase
   project "Counsellor Performance" (`oifzauaspvfkmzyutwtj`).
-- `.github/workflows/refresh.yml`: workflow_dispatch only; cron-job.org starts it at 09:00, 13:00, 17:00, 20:00 IST.
+- `.github/workflows/refresh.yml`: workflow_dispatch only; Supabase pg_cron / the Update button start it.
   No Claude and no LLM call in daily runs.
-- `web/`: static dashboard (no build step) at https://counsellor-performance.amitray.workers.dev (Cloudflare, deploys on push to main); Supabase email login; only emails in `allowed_users` can read.
+- `web/`: static dashboard "Sales Analytics Dashboard" (no build step) at https://counsellor-performance.amitray.workers.dev (Cloudflare, deploys on push to main); Supabase email login; only emails in `allowed_users` can read.
 - Database objects: tables roster, name_alias, revenue_txn, calls_daily, unmapped_names, refresh_log, allowed_users;
-  functions get_perf(from, to, grain) and get_courses(from, to, email). Change schema with a migration, keep RLS on.
+  functions rev_agg / rev_dims / rev_courses (revenue pages), request_refresh (Update button), _dispatch_refresh + pg_cron jobs
+  (09:00 full, 13:00, 17:00, 20:00, 23:00 IST) using the Vault secret github_token; get_perf/get_courses (calling, unused). Change schema with a migration, keep RLS on.
 
 ## Rules
 - Never read or store customer name, phone or email from revenue sheets (the column list in `etl/config.py`).

@@ -1,365 +1,441 @@
-/* Counsellor Performance dashboard. Data: Supabase RPC get_perf / get_courses (row level security on). */
+/* Sales Analytics Dashboard — Revenue Metrics. Data: Supabase RPC rev_agg / rev_dims / rev_courses (RLS on). */
 const sb = supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey);
 const $ = (id) => document.getElementById(id);
-const S = { cmpLevel: "vertical", cmpMetric: "revenue", from: null, to: null, grain: "month", level: "person", sort: "revenue", dir: -1,
-            rows: [], prev: [], roster: [], charts: {} };
+const PAGES = {
+  overall: { title: "Overall Performance", level: "none" },
+  vertical: { title: "Vertical Wise Performance", level: "vertical", label: "Vertical" },
+  team: { title: "Teamwise Performance", level: "team", label: "Team" },
+  caller: { title: "Caller Wise Performance", level: "caller", label: "Caller" },
+};
+const STATUS = { current: "Current", resigned: "Resigned", direct: "Direct", "no caller": "No caller details" };
+const S = { page: "overall", dims: [], charts: {}, export: [], sort: { k: "revenue", dir: -1 }, pivotMetric: "revenue", seq: 0 };
 
-/* ---------- formatting ---------- */
+/* ---------- format ---------- */
 const inr0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-function rupees(v, compact = true) {
+function rupees(v) {
   if (v == null || !isFinite(v)) return "–";
   const a = Math.abs(v);
-  if (compact && a >= 1e7) return "₹" + (v / 1e7).toFixed(2) + " Cr";
-  if (compact && a >= 1e5) return "₹" + (v / 1e5).toFixed(2) + " L";
+  if (a >= 1e7) return "₹" + (v / 1e7).toFixed(2) + " Cr";
+  if (a >= 1e5) return "₹" + (v / 1e5).toFixed(2) + " L";
   return "₹" + inr0.format(v);
 }
-const num = (v, d = 0) => (v == null || !isFinite(v) ? "–" : v.toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d }));
+const num = (v) => (v == null || !isFinite(v) ? "–" : inr0.format(v));
 const pct = (v) => (v == null || !isFinite(v) ? "–" : (v * 100).toFixed(1) + "%");
+const change = (c, p) => (p ? (c - p) / Math.abs(p) : null);
+const chHtml = (ch) => ch == null ? `<span class="muted">–</span>` :
+  `<span class="${ch >= 0 ? "up" : "down"}">${ch >= 0 ? "▲" : "▼"} ${Math.abs(ch * 100).toFixed(1)}%</span>`;
+const chTxt = (ch) => ch == null ? "" : `${ch >= 0 ? "▲" : "▼"}${Math.abs(ch * 100).toFixed(0)}%`;
 
 /* ---------- dates (IST) ---------- */
 const istToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const D = (s) => new Date(s + "T00:00:00Z");
 const iso = (d) => d.toISOString().slice(0, 10);
 const addDays = (s, n) => { const d = D(s); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
-const daysBetween = (a, b) => Math.round((D(b) - D(a)) / 864e5) + 1;
-function fyStart(s) { const d = D(s); const y = d.getUTCMonth() < 3 ? d.getUTCFullYear() - 1 : d.getUTCFullYear(); return `${y}-04-01`; }
+function lastYear(s) { const [y, m, d] = s.split("-").map(Number); const last = new Date(Date.UTC(y - 1, m, 0)).getUTCDate();
+  return `${y - 1}-${String(m).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`; }
+const fyStart = (s) => { const d = D(s); return `${d.getUTCMonth() < 3 ? d.getUTCFullYear() - 1 : d.getUTCFullYear()}-04-01`; };
+const nice = (s) => D(s).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+function periodLabel(p, g) {
+  const d = D(p);
+  if (g === "day") return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
+  if (g === "week") return "Wk of " + d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
+  if (g === "month") return d.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: "UTC" });
+  const y = d.getUTCFullYear(); return `FY ${y}-${String(y + 1).slice(2)}`;
+}
+const lyKey = (p, g) => (g === "week" ? addDays(p, -364) : lastYear(p));  // the same period one year earlier
 function preset(p) {
-  const t = istToday(), d = D(t);
-  const monthStart = t.slice(0, 8) + "01";
+  const t = istToday(), ms = t.slice(0, 8) + "01";
   switch (p) {
     case "today": return [t, t, "day"];
     case "yesterday": { const y = addDays(t, -1); return [y, y, "day"]; }
-    case "week": { const dow = (d.getUTCDay() + 6) % 7; return [addDays(t, -dow), t, "day"]; }
-    case "month": return [monthStart, t, "day"];
-    case "lastmonth": { const e = addDays(monthStart, -1); return [e.slice(0, 8) + "01", e, "week"]; }
+    case "week": return [addDays(t, -((D(t).getUTCDay() + 6) % 7)), t, "day"];
+    case "month": return [ms, t, "day"];
+    case "lastmonth": { const e = addDays(ms, -1); return [e.slice(0, 8) + "01", e, "day"]; }
     case "all": return ["2023-04-01", t, "fy"];
   }
 }
-function periodLabel(p, grain) {
-  const d = D(p);
-  if (grain === "day") return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
-  if (grain === "week") return "Wk " + d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
-  if (grain === "month") return d.toLocaleDateString("en-IN", { month: "short", year: "2-digit", timeZone: "UTC" });
-  const y = d.getUTCFullYear(); return `FY${String(y).slice(2)}-${String(y + 1).slice(2)}`;
-}
-
-/* ---------- metrics ---------- */
-const FIELDS = ["revenue", "new_enrolments", "new_enrolment_revenue", "txns", "outbound", "outbound_answered",
-  "inbound", "inbound_answered", "talk_sec", "calls_2m", "calls_5m", "calls_15m"];
-function sum(rows) {
-  const o = Object.fromEntries(FIELDS.map((f) => [f, 0]));
-  for (const r of rows) for (const f of FIELDS) o[f] += Number(r[f]) || 0;
-  o.connects = o.outbound_answered + o.inbound_answered;
-  o.avg_fee = o.new_enrolments ? o.new_enrolment_revenue / o.new_enrolments : null;
-  o.balance = o.revenue - o.new_enrolment_revenue;
-  o.connect_rate = o.outbound ? o.outbound_answered / o.outbound : null;
-  o.talk_h = o.talk_sec / 3600;
-  o.enr_per_100 = o.connects ? (o.new_enrolments * 100) / o.connects : null;
-  o.rev_per_talk_h = o.talk_h ? o.revenue / o.talk_h : null;
-  return o;
-}
-const KPIS = [
-  ["revenue", "Revenue", (v) => rupees(v)],
-  ["new_enrolments", "New enrolments", (v) => num(v)],
-  ["avg_fee", "Avg new-enrolment fee", (v) => rupees(v)],
-  ["balance", "Balance-payment revenue", (v) => rupees(v)],
-  ["outbound", "Outbound dials", (v) => num(v)],
-  ["connects", "Connected calls", (v) => num(v)],
-  ["talk_h", "Talk hours", (v) => num(v, 1)],
-  ["calls_5m", "Conversations 5 min+", (v) => num(v)],
-  ["enr_per_100", "Enrolments per 100 connects", (v) => num(v, 2)],
-  ["rev_per_talk_h", "Revenue per talk hour", (v) => rupees(v)],
-];
 
 /* ---------- data ---------- */
 async function rpcAll(fn, args) {
-  const out = []; const page = 1000;
-  for (let i = 0; ; i += page) {
-    const { data, error } = await sb.rpc(fn, args).range(i, i + page - 1);
+  const out = [];
+  for (let i = 0; ; i += 1000) {
+    const { data, error } = await sb.rpc(fn, args).range(i, i + 999);
     if (error) throw error;
     out.push(...data);
-    if (data.length < page) return out;
+    if (data.length < 1000) return out;
   }
 }
-function filtered(rows) {
-  const v = $("f-vertical").value, t = $("f-team").value, p = $("f-person").value;
-  return rows.filter((r) => (!v || r.vertical === v) && (!t || r.team === t) && (!p || r.email === p));
-}
-
-async function load() {
-  let grain = $("grain").value;
+function range() {
   const from = $("from").value, to = $("to").value;
-  if (!from || !to || from > to) return;
-  let note = "";
-  if (grain === "day" && daysBetween(from, to) > 92) { grain = "week"; note = "Shown by week (over 92 days)"; }
-  S.from = from; S.to = to; S.grain = grain;
-  $("trend-note").textContent = note;
-  const len = daysBetween(from, to);
-  const pTo = addDays(from, -1), pFrom = addDays(from, -len);
-  S.pFrom = pFrom; S.pTo = pTo;
-  try {
-    [S.rows, S.prev] = await Promise.all([
-      rpcAll("get_perf", { p_from: from, p_to: to, p_grain: grain }),
-      rpcAll("get_perf", { p_from: pFrom, p_to: pTo, p_grain: "fy" }),
-    ]);
-  } catch (e) { showError(e); return; }
-  render();
+  return { from, to, pf: lastYear(from), pt: lastYear(to), grain: $("grain").value };
 }
-
-/* ---------- render ---------- */
-function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
-
-function render() {
-  const cur = sum(filtered(S.rows)), prev = sum(filtered(S.prev));
-  $("kpis").innerHTML = KPIS.map(([k, label, fmt]) => kpiHtml(label, fmt(cur[k]), cur[k], prev[k])).join("");
-  renderTrend(); renderByVertical(); renderCompare(); renderBoard();
+function filters(level) {
+  const f = { p_vertical: null, p_team: null, p_status: null, p_caller: null };
+  if (level !== "none") f.p_vertical = $("f-vertical").value || null;
+  if (level === "team" || level === "caller") f.p_team = $("f-team").value || null;
+  if (level === "caller") f.p_status = $("f-status").value || null;
+  return f;
 }
+const tot = (rows) => rows.reduce((a, r) => ({ revenue: a.revenue + Number(r.revenue || 0),
+  enrolments: a.enrolments + Number(r.enrolments || 0), payments: a.payments + Number(r.payments || 0) }), { revenue: 0, enrolments: 0, payments: 0 });
 
-function renderCompare() {
-  const rows = filtered(S.rows), m = S.cmpMetric;
-  const fmt = m === "revenue" ? (v) => rupees(v) : (v) => num(v);
-  const key = S.cmpLevel === "vertical" ? (r) => r.vertical : (r) => r.vertical + " · " + r.team;
-  const periods = [...new Set(rows.map((r) => r.period))].sort();
-  const groups = [...groupBy(rows, key)].map(([k, rs]) => {
-    const byP = groupBy(rs, (r) => r.period);
-    const vals = periods.map((p) => sum(byP.get(p) || [])[m]);
-    return { k, vals, total: vals.reduce((a, b) => a + b, 0) };
-  }).sort((a, b) => b.total - a.total);
-  const prevBy = groupBy(filtered(S.prev), key);
-  const names = [...new Set([...groups.map((g) => g.k), ...prevBy.keys()])];
-  const bars = names.map((k) => {
-    const cur = groups.find((g) => g.k === k)?.total || 0, prev = sum(prevBy.get(k) || [])[m];
-    return { k, cur, prev, ch: prev ? (cur - prev) / Math.abs(prev) : null };
-  }).sort((a, b) => b.cur - a.cur).slice(0, 15);
-  const short = (s) => D(s).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
-  const what = m === "revenue" ? "Revenue" : "New enrolments";
-  $("cmp-sub").textContent = `${what}: ${short(S.from)} – ${short(S.to)} compared with ${short(S.pFrom)} – ${short(S.pTo)}`;
-  $("cmp-box").style.height = Math.max(220, 70 + bars.length * 52) + "px";
-  const chTxt = (b) => b.ch == null ? "new" : `${b.ch >= 0 ? "▲" : "▼"} ${Math.abs(b.ch * 100).toFixed(1)}%`;
-  chart("cmp-chart", {
-    type: "bar",
-    data: { labels: bars.map((b) => [b.k, chTxt(b)]),
-      datasets: [
-        { label: `Previous (${short(S.pFrom)} – ${short(S.pTo)})`, data: bars.map((b) => b.prev), backgroundColor: css("--line"), borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.75 },
-        { label: `Selected (${short(S.from)} – ${short(S.to)})`, data: bars.map((b) => b.cur), backgroundColor: css("--c1"), borderRadius: 4, barPercentage: 0.9, categoryPercentage: 0.75 },
-      ] },
-    options: { indexAxis: "y", responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: "bottom" },
-        tooltip: { callbacks: { label: (c) => ` ${c.dataset.label.split(" (")[0]}: ${fmt(c.raw)}`,
-          afterBody: (items) => { const b = bars[items[0].dataIndex]; return b.ch == null ? "No data in the previous period" : `Change: ${chTxt(b)}`; } } } },
-      scales: { x: { beginAtZero: true, ticks: { callback: (v) => fmt(v) }, grid: { color: css("--line") } },
-        y: { grid: { display: false }, ticks: { color: (c) => { const b = bars[c.index]; return b && b.ch != null && b.ch < 0 ? css("--bad") : css("--ink"); }, font: { weight: "600" } } } } },
-  });
-  const tot = periods.map((_, i) => groups.reduce((a, g) => a + g.vals[i], 0));
-  const change = (v) => { const n = v.length; if (n < 2 || !v[n - 2]) return "–";
-    const ch = (v[n - 1] - v[n - 2]) / Math.abs(v[n - 2]); return `<span class="${ch >= 0 ? "up" : "down"}">${ch >= 0 ? "▲" : "▼"} ${Math.abs(ch * 100).toFixed(1)}%</span>`; };
-  const head = `<thead><tr><th class="l">${S.cmpLevel === "vertical" ? "Vertical" : "Team"}</th>${periods.map((p) => `<th>${periodLabel(p, S.grain)}</th>`).join("")}<th class="total">Total</th><th>Change</th><th>Share</th></tr></thead>`;
-  const grand = tot.reduce((a, b) => a + b, 0) || 1;
-  const body = groups.map((g) => `<tr><td class="l">${esc(g.k)}</td>${g.vals.map((v) => `<td class="num">${fmt(v)}</td>`).join("")}
-    <td class="num total">${fmt(g.total)}</td><td class="num">${change(g.vals)}</td><td class="num">${pct(g.total / grand)}</td></tr>`).join("");
-  const foot = `<tr><td class="l"><b>All</b></td>${tot.map((v) => `<td class="num"><b>${fmt(v)}</b></td>`).join("")}<td class="num total">${fmt(grand === 1 && !tot.length ? 0 : tot.reduce((a, b) => a + b, 0))}</td><td class="num">${change(tot)}</td><td class="num">100%</td></tr>`;
-  $("cmp-table").innerHTML = head + `<tbody>${body}${groups.length ? foot : `<tr><td class="l muted">No data for this period.</td></tr>`}</tbody>`;
-}
-function kpiHtml(label, value, c, p) {
-  let d = "";
-  if (p != null && isFinite(p) && p !== 0 && c != null && isFinite(c)) {
-    const ch = (c - p) / Math.abs(p);
-    d = `<div class="d ${ch >= 0 ? "up" : "down"}">${ch >= 0 ? "▲" : "▼"} ${Math.abs(ch * 100).toFixed(1)}% vs previous period</div>`;
-  } else d = `<div class="d muted">no earlier data</div>`;
-  return `<div class="kpi"><div class="k">${esc(label)}</div><div class="v num">${value}</div>${d}</div>`;
-}
-
-function groupBy(rows, keyFn) {
-  const m = new Map();
-  for (const r of rows) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
-  return m;
-}
-
+/* ---------- charts ---------- */
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const palette = () => ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6", "--c7", "--c8"].map(css);
+const barLabels = {  // writes "N enr" on each bar (or on top of a stack)
+  id: "barLabels",
+  afterDatasetsDraw(chart) {
+    const o = chart.options.plugins.barLabels; if (!o || !o.labels) return;
+    const meta = chart.getDatasetMeta(o.dataset ?? 0); if (!meta || meta.hidden) return;
+    if (meta.data.length > (o.max || 40)) return;
+    const ctx = chart.ctx; ctx.save();
+    ctx.font = "600 11px 'DM Sans', sans-serif"; ctx.fillStyle = css("--ink");
+    const horiz = chart.options.indexAxis === "y";
+    meta.data.forEach((el, i) => {
+      const t = o.labels[i]; if (!t) return;
+      if (horiz) { ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(t, el.x + 6, el.y); }
+      else { ctx.textAlign = "center"; ctx.textBaseline = "bottom"; ctx.fillText(t, el.x, Math.min(el.y, el.base) - 4); }
+    });
+    ctx.restore();
+  },
+};
 function chart(id, cfg) {
   if (S.charts[id]) S.charts[id].destroy();
-  const ink = css("--muted"), line = css("--line");
-  Chart.defaults.color = ink; Chart.defaults.borderColor = line;
-  Chart.defaults.font.family = "Inter, system-ui, sans-serif";
-  S.charts[id] = new Chart($(id), cfg);
+  const el = $(id); if (!el) return;
+  Chart.defaults.color = css("--muted"); Chart.defaults.borderColor = css("--line");
+  Chart.defaults.font.family = "'DM Sans', system-ui, sans-serif";
+  cfg.plugins = [barLabels];
+  S.charts[id] = new Chart(el, cfg);
 }
-
-function trendConfig(rows, grain) {
-  const g = [...groupBy(rows, (r) => r.period)].sort((a, b) => (a[0] < b[0] ? -1 : 1));
-  const labels = g.map(([p]) => periodLabel(p, grain));
-  const s = g.map(([, rs]) => sum(rs));
+const yRupees = () => ({ beginAtZero: true, ticks: { callback: (v) => rupees(v) }, grid: { color: css("--line") } });
+function revenueBarsConfig(labels, rev, enr, extraTip) {
   return {
-    data: {
-      labels,
-      datasets: [
-        { type: "bar", label: "Revenue", data: s.map((x) => x.revenue), backgroundColor: css("--c1"), borderRadius: 4, yAxisID: "y" },
-        { type: "line", label: "New enrolments", data: s.map((x) => x.new_enrolments), borderColor: css("--c3"),
-          backgroundColor: css("--c3"), tension: 0.3, pointRadius: 3, yAxisID: "y1" },
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { position: "bottom" },
-        tooltip: { callbacks: { label: (c) => c.dataset.yAxisID === "y" ? ` Revenue ${rupees(c.raw)}` : ` New enrolments ${num(c.raw)}` } } },
-      scales: { y: { ticks: { callback: (v) => rupees(v) }, grid: { color: css("--line") } },
-                y1: { position: "right", grid: { display: false }, beginAtZero: true, ticks: { precision: 0 } },
-                x: { grid: { display: false } } },
-    },
+    type: "bar",
+    data: { labels, datasets: [{ label: "Revenue", data: rev, backgroundColor: css("--accent"), borderRadius: 5, maxBarThickness: 46 }] },
+    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 20 } },
+      plugins: { legend: { display: false }, barLabels: { labels: enr.map((e) => `${num(e)} enr`) },
+        tooltip: { callbacks: { label: (c) => ` Revenue ${rupees(c.raw)}`, afterLabel: (c) => ` New enrolments ${num(enr[c.dataIndex])}` + (extraTip ? extraTip(c.dataIndex) : "") } } },
+      scales: { y: yRupees(), x: { grid: { display: false } } } },
   };
 }
-function renderTrend() { chart("trend", trendConfig(filtered(S.rows), S.grain)); }
 
-function renderByVertical() {
-  const rows = filtered(S.rows);
-  const g = [...groupBy(rows, (r) => r.vertical)].map(([v, rs]) => [v, sum(rs)]).sort((a, b) => b[1].revenue - a[1].revenue);
-  chart("byvert", {
+/* ---------- page shell ---------- */
+function kpi(label, value, cur, prev, prevText) {
+  return `<div class="kpi"><div class="k">${esc(label)}</div><div class="v num">${value}</div>
+    <div class="d">${chHtml(change(cur, prev))} vs ${prevText}</div></div>`;
+}
+function table(cols, rows, opts = {}) {
+  const head = `<thead><tr>${cols.map((c) => `<th class="${c.l ? "l" : ""} ${opts.sort && S.sort.k === c.k ? "sorted" : ""}" data-k="${c.k || ""}">${esc(c.h)}${opts.sort && S.sort.k === c.k ? (S.sort.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}</tr></thead>`;
+  const body = rows.map((r) => `<tr class="${opts.click && !r._total ? "click" : ""} ${r._total ? "total" : ""}" ${opts.click ? `data-i="${r._i}"` : ""}>${cols.map((c) =>
+    `<td class="${c.l ? "l" : "num"}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join("")}</tr>`).join("");
+  return `<table>${head}<tbody>${body || `<tr><td class="l muted" colspan="${cols.length}">No data for these filters.</td></tr>`}</tbody></table>`;
+}
+function setSub() {
+  const r = range();
+  $("page-sub").innerHTML = `${nice(r.from)} – ${nice(r.to)} &nbsp;·&nbsp; compared with <b>${nice(r.pf)} – ${nice(r.pt)}</b> (same dates last year)`;
+}
+
+async function render() {
+  const r = range(); if (!r.from || !r.to || r.from > r.to) return;
+  const seq = ++S.seq;
+  setSub(); $("content").classList.add("loading");
+  try {
+    if (S.page === "overall") await renderOverall(r, seq);
+    else await renderLevel(r, seq, PAGES[S.page]);
+  } catch (e) { if (seq === S.seq) $("content").innerHTML = `<div class="card empty">Could not load data: ${esc(e.message || e)}</div>`; }
+  $("content").classList.remove("loading");
+}
+
+/* ---------- Overall ---------- */
+async function renderOverall(r, seq) {
+  const [cur, ly, fys] = await Promise.all([
+    rpcAll("rev_agg", { p_from: r.from, p_to: r.to, p_grain: r.grain, p_group: "none" }),
+    rpcAll("rev_agg", { p_from: r.pf, p_to: r.pt, p_grain: r.grain, p_group: "none" }),
+    rpcAll("rev_agg", { p_from: "2023-04-01", p_to: istToday(), p_grain: "fy", p_group: "none" }),
+  ]);
+  if (seq !== S.seq) return;
+  const c = tot(cur), p = tot(ly), prevText = `${nice(r.pf)} – ${nice(r.pt)}`;
+  const lyBy = new Map(ly.map((x) => [x.period, x]));
+  const rows = cur.map((x) => { const l = lyBy.get(lyKey(x.period, r.grain)) || {};
+    return { period: x.period, label: periodLabel(x.period, r.grain), revenue: +x.revenue, enrolments: +x.enrolments, payments: +x.payments,
+      ly_revenue: l.revenue != null ? +l.revenue : null, ly_enrolments: l.enrolments != null ? +l.enrolments : null }; });
+  const fyRows = fys.map((x, i) => ({ label: periodLabel(x.period, "fy"), revenue: +x.revenue, enrolments: +x.enrolments, payments: +x.payments,
+    growth: i ? change(+x.revenue, +fys[i - 1].revenue) : null }));
+
+  $("content").innerHTML = `
+    <section class="kpis">
+      ${kpi("Revenue (Fee paid)", rupees(c.revenue), c.revenue, p.revenue, prevText)}
+      ${kpi("New enrolments", num(c.enrolments), c.enrolments, p.enrolments, prevText)}
+    </section>
+    <section class="card"><div class="card-h"><h3>Revenue by ${{ day: "day", week: "week", month: "month", fy: "financial year" }[r.grain]}</h3>
+      <span class="muted small">Bar = revenue · label = new enrolments</span></div>
+      <div class="chart-box"><canvas id="ch-main"></canvas></div></section>
+    <section class="card"><div class="card-h"><h3>Data by period</h3><span class="muted small">Last year = the same period one year earlier</span></div>
+      <div class="table-wrap">${table([
+        { h: "Period", k: "label", l: 1 }, { h: "Revenue", f: (x) => rupees(x.revenue) }, { h: "New enrolments", f: (x) => num(x.enrolments) },
+        { h: "Payments", f: (x) => num(x.payments) }, { h: "Revenue last year", f: (x) => rupees(x.ly_revenue) },
+        { h: "Enrolments last year", f: (x) => num(x.ly_enrolments) }, { h: "Revenue change", f: (x) => chHtml(change(x.revenue, x.ly_revenue)) },
+      ], [...rows, { _total: 1, label: "Total", revenue: c.revenue, enrolments: c.enrolments, payments: c.payments, ly_revenue: p.revenue, ly_enrolments: p.enrolments }])}</div></section>
+    <section class="grid2">
+      <div class="card"><div class="card-h"><h3>Every financial year</h3><span class="muted small">All data, not affected by the dates above</span></div>
+        <div class="chart-box"><canvas id="ch-fy"></canvas></div></div>
+      <div class="card"><h3>Financial year summary</h3><div class="table-wrap">${table([
+        { h: "Financial year", k: "label", l: 1 }, { h: "Revenue", f: (x) => rupees(x.revenue) }, { h: "New enrolments", f: (x) => num(x.enrolments) },
+        { h: "Payments", f: (x) => num(x.payments) }, { h: "Growth vs previous FY", f: (x) => chHtml(x.growth) }], fyRows)}</div>
+        <p class="note">The current financial year is still in progress.</p></div>
+    </section>`;
+  chart("ch-main", revenueBarsConfig(rows.map((x) => x.label), rows.map((x) => x.revenue), rows.map((x) => x.enrolments),
+    (i) => rows[i].ly_revenue != null ? `\n Last year ${rupees(rows[i].ly_revenue)} · ${num(rows[i].ly_enrolments)} enr` : ""));
+  chart("ch-fy", revenueBarsConfig(fyRows.map((x) => x.label), fyRows.map((x) => x.revenue), fyRows.map((x) => x.enrolments)));
+  S.export = [
+    { name: "By period", rows: rows.map((x) => ({ Period: x.label, "Start date": x.period, Revenue: x.revenue, "New enrolments": x.enrolments,
+      Payments: x.payments, "Revenue last year": x.ly_revenue, "Enrolments last year": x.ly_enrolments })) },
+    { name: "Financial years", rows: fyRows.map((x) => ({ "Financial year": x.label, Revenue: x.revenue, "New enrolments": x.enrolments, Payments: x.payments,
+      "Growth vs previous FY": x.growth })) },
+  ];
+}
+
+/* ---------- Vertical / Team / Caller ---------- */
+const keyOf = { vertical: (x) => x.vertical, team: (x) => `${x.team}||${x.vertical}`, caller: (x) => `${x.caller}||${x.caller_status}||${x.team}||${x.vertical}` };
+async function renderLevel(r, seq, page) {
+  const lvl = page.level, base = { p_group: lvl, ...filters(lvl) };
+  const [cur, ly, series] = await Promise.all([
+    rpcAll("rev_agg", { p_from: r.from, p_to: r.to, p_grain: "none", ...base }),
+    rpcAll("rev_agg", { p_from: r.pf, p_to: r.pt, p_grain: "none", ...base }),
+    lvl === "caller" ? Promise.resolve([]) : rpcAll("rev_agg", { p_from: r.from, p_to: r.to, p_grain: r.grain, ...base }),
+  ]);
+  if (seq !== S.seq) return;
+  const k = keyOf[lvl], lyBy = new Map(ly.map((x) => [k(x), x]));
+  const q = ($("f-caller").value || "").trim().toLowerCase();
+  const match = (x) => !q || (x.caller || "").toLowerCase().includes(q);
+  let rows = cur.filter(match).map((x) => { const l = lyBy.get(k(x));
+    return { key: k(x), vertical: x.vertical, team: x.team, caller: x.caller, status: x.caller_status,
+      revenue: +x.revenue, enrolments: +x.enrolments, payments: +x.payments,
+      ly_revenue: l ? +l.revenue : 0, ly_enrolments: l ? +l.enrolments : 0 }; });
+  const c = tot(rows), pTot = tot(ly.filter(match)), all = c.revenue || 1;
+  rows.forEach((x) => { x.share = x.revenue / all; x.change = change(x.revenue, x.ly_revenue); });
+  rows.sort((a, b) => S.sort.dir * (((a[S.sort.k] ?? -Infinity) > (b[S.sort.k] ?? -Infinity)) ? 1 : -1));
+  rows.forEach((x, i) => (x._i = i));
+  S.rows = rows;
+  const name = (x) => lvl === "vertical" ? x.vertical : lvl === "team" ? x.team : x.caller;
+  const prevText = `${nice(r.pf)} – ${nice(r.pt)}`;
+  const top = [...rows].sort((a, b) => b.revenue - a.revenue).slice(0, 15);
+
+  const cols = [{ h: "#", f: (x) => (x._total ? "" : x._i + 1) }];
+  if (lvl === "caller") cols.push({ h: "Caller", k: "caller", l: 1 },
+    { h: "Type", l: 1, f: (x) => x._total ? "" : `<span class="badge ${x.status === "no caller" ? "" : esc(x.status)}">${esc(STATUS[x.status] || x.status)}</span>` });
+  if (lvl !== "vertical") cols.push({ h: "Team", k: "team", l: 1 });
+  cols.push({ h: "Vertical", k: "vertical", l: 1 },
+    { h: "Revenue", k: "revenue", f: (x) => rupees(x.revenue) }, { h: "New enrolments", k: "enrolments", f: (x) => num(x.enrolments) },
+    { h: "Payments", k: "payments", f: (x) => num(x.payments) }, { h: "Share", k: "share", f: (x) => pct(x.share) },
+    { h: "Revenue last year", k: "ly_revenue", f: (x) => rupees(x.ly_revenue) }, { h: "Enrolments last year", k: "ly_enrolments", f: (x) => num(x.ly_enrolments) },
+    { h: "Change", k: "change", f: (x) => chHtml(x.change) });
+  const totalRow = { _total: 1, _i: -1, caller: "Total", team: lvl === "team" ? "Total" : "", vertical: lvl === "vertical" ? "Total" : "",
+    revenue: c.revenue, enrolments: c.enrolments, payments: c.payments, share: 1, ly_revenue: pTot.revenue, ly_enrolments: pTot.enrolments,
+    change: change(c.revenue, pTot.revenue) };
+
+  // trend: stacked bars per period for the 6 biggest groups + Others (vertical/team pages)
+  const periods = [...new Set(series.map((x) => x.period))].sort();
+  const bigKeys = top.slice(0, 6).map((x) => x.key);
+  const stack = new Map();
+  for (const x of series) { const key = bigKeys.includes(k(x)) ? k(x) : "Others";
+    if (!stack.has(key)) stack.set(key, new Map()); const m = stack.get(key); m.set(x.period, (m.get(x.period) || 0) + +x.revenue); }
+  const enrBy = new Map(); series.forEach((x) => enrBy.set(x.period, (enrBy.get(x.period) || 0) + +x.enrolments));
+  const keyName = (key) => key === "Others" ? "Others" : (lvl === "team" ? key.split("||")[0] : key);
+
+  // pivot: group x period
+  const piv = new Map(); series.forEach((x) => { const m = piv.get(k(x)) || new Map(); m.set(x.period, x); piv.set(k(x), m); });
+  const metric = S.pivotMetric, pf = metric === "revenue" ? rupees : num;
+  const pivRows = [...rows].sort((a, b) => b.revenue - a.revenue).map((x) => { const m = piv.get(x.key) || new Map();
+    const o = { n: name(x) + (lvl === "team" ? ` (${x.vertical})` : "") }; let t = 0;
+    periods.forEach((p) => { const v = m.get(p) ? +m.get(p)[metric] : 0; o[p] = v; t += v; }); o.t = t; return o; });
+
+  $("content").innerHTML = `
+    <section class="kpis">
+      ${kpi("Revenue (Fee paid)", rupees(c.revenue), c.revenue, pTot.revenue, prevText)}
+      ${kpi("New enrolments", num(c.enrolments), c.enrolments, pTot.enrolments, prevText)}
+      <div class="kpi"><div class="k">${page.label}s with revenue</div><div class="v num">${num(rows.filter((x) => x.revenue > 0).length)}</div>
+        <div class="d">in the selected dates</div></div>
+    </section>
+    <section class="card"><div class="card-h"><h3>${lvl === "caller" ? "Top 15 callers" : `Revenue by ${page.label.toLowerCase()}`}</h3>
+      <span class="muted small">Orange = selected dates · grey = same dates last year · label = new enrolments and change</span></div>
+      <div class="chart-box" style="height:${Math.max(260, 70 + top.length * 42)}px"><canvas id="ch-rank"></canvas></div></section>
+    ${lvl === "caller" ? "" : `<section class="card"><div class="card-h"><h3>Trend by ${page.label.toLowerCase()}</h3>
+      <span class="muted small">Stacked revenue per period · label = new enrolments in that period</span></div>
+      <div class="chart-box"><canvas id="ch-trend"></canvas></div></section>`}
+    <section class="card"><div class="card-h"><h3>${lvl === "caller" ? "Caller leaderboard" : `${page.label} table`}</h3>
+      <span class="muted small">${lvl === "caller" ? "Click a caller for their trend and courses. " : ""}Click a column to sort.</span></div>
+      <div class="table-wrap" id="board">${table(cols, [...rows, totalRow], { sort: true, click: lvl === "caller" })}</div></section>
+    ${lvl === "caller" ? "" : `<section class="card"><div class="card-h"><h3>${page.label} by period</h3>
+      <div class="seg" id="pivot-metric"><button data-m="revenue" class="${metric === "revenue" ? "on" : ""}">Revenue</button>
+      <button data-m="enrolments" class="${metric === "enrolments" ? "on" : ""}">New enrolments</button></div></div>
+      <div class="table-wrap">${table([{ h: page.label, k: "n", l: 1 }, ...periods.map((p) => ({ h: periodLabel(p, r.grain), f: (x) => pf(x[p]) })), { h: "Total", f: (x) => pf(x.t) }], pivRows)}</div></section>`}`;
+
+  chart("ch-rank", {
     type: "bar",
-    data: { labels: g.map(([v]) => v), datasets: [{ label: "Revenue", data: g.map(([, s]) => s.revenue),
-      backgroundColor: [css("--c1"), css("--c2"), css("--c3")], borderRadius: 4 }] },
-    options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
-      tooltip: { callbacks: { label: (c) => ` ${rupees(c.raw)} · ${num(g[c.dataIndex][1].new_enrolments)} new enrolments` } } },
-      scales: { x: { ticks: { callback: (v) => rupees(v) }, grid: { color: css("--line") } }, y: { grid: { display: false } } } },
+    data: { labels: top.map((x) => lvl === "team" ? [x.team, x.vertical] : lvl === "caller" ? [x.caller, `${x.team} · ${STATUS[x.status] || ""}`] : x.vertical),
+      datasets: [
+        { label: "Selected dates", data: top.map((x) => x.revenue), backgroundColor: css("--accent"), borderRadius: 4, barPercentage: .9, categoryPercentage: .78 },
+        { label: "Same dates last year", data: top.map((x) => x.ly_revenue), backgroundColor: css("--ly"), borderRadius: 4, barPercentage: .9, categoryPercentage: .78 },
+      ] },
+    options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, layout: { padding: { right: 120 } },
+      plugins: { legend: { position: "bottom" }, barLabels: { dataset: 0, labels: top.map((x) => `${num(x.enrolments)} enr  ${chTxt(x.change)}`) },
+        tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${rupees(c.raw)} · ${num(c.datasetIndex ? top[c.dataIndex].ly_enrolments : top[c.dataIndex].enrolments)} enr` } } },
+      scales: { x: yRupees(), y: { grid: { display: false }, ticks: { color: css("--ink") } } } },
   });
-}
-
-const COLS = [
-  ["revenue", "Revenue", (s) => rupees(s.revenue)],
-  ["new_enrolments", "New enr.", (s) => num(s.new_enrolments)],
-  ["avg_fee", "Avg fee", (s) => rupees(s.avg_fee)],
-  ["balance", "Balance rev.", (s) => rupees(s.balance)],
-  ["outbound", "Dials", (s) => num(s.outbound)],
-  ["connects", "Connects", (s) => num(s.connects)],
-  ["connect_rate", "Connect %", (s) => pct(s.connect_rate)],
-  ["talk_h", "Talk h", (s) => num(s.talk_h, 1)],
-  ["calls_5m", "5 min+", (s) => num(s.calls_5m)],
-  ["enr_per_100", "Enr / 100 conn.", (s) => num(s.enr_per_100, 2)],
-  ["rev_per_talk_h", "Rev / talk h", (s) => rupees(s.rev_per_talk_h)],
-];
-function renderBoard() {
-  const rows = filtered(S.rows);
-  const key = { vertical: (r) => r.vertical, team: (r) => r.vertical + " · " + r.team, person: (r) => r.email }[S.level];
-  let g = [...groupBy(rows, key)].map(([k, rs]) => ({ k, r: rs[0], s: sum(rs) }));
-  // counsellors with no activity still appear in the counsellor view
-  if (S.level === "person") {
-    const seen = new Set(g.map((x) => x.k));
-    for (const p of rosterFiltered()) if (!seen.has(p.email)) g.push({ k: p.email, r: p, s: sum([]) });
+  if (lvl !== "caller") {
+    const pal = palette(), keys = [...stack.keys()].sort((a, b) => (a === "Others") - (b === "Others"));
+    chart("ch-trend", {
+      type: "bar",
+      data: { labels: periods.map((p) => periodLabel(p, r.grain)),
+        datasets: keys.map((key, i) => ({ label: keyName(key), data: periods.map((p) => stack.get(key).get(p) || 0),
+          backgroundColor: key === "Others" ? css("--ly") : pal[i % pal.length], stack: "s", maxBarThickness: 46 })) },
+      options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 20 } },
+        plugins: { legend: { position: "bottom" }, barLabels: { dataset: keys.length - 1, labels: periods.map((p) => `${num(enrBy.get(p) || 0)} enr`) },
+          tooltip: { mode: "index", callbacks: { label: (c) => ` ${c.dataset.label}: ${rupees(c.raw)}`, footer: (it) => `New enrolments: ${num(enrBy.get(periods[it[0].dataIndex]) || 0)}` } } },
+        scales: { x: { stacked: true, grid: { display: false } }, y: { ...yRupees(), stacked: true } } },
+    });
   }
-  const maxRev = Math.max(1, ...g.map((x) => x.s.revenue));
-  g.sort((a, b) => S.dir * (((a.s[S.sort] ?? -Infinity) > (b.s[S.sort] ?? -Infinity)) ? 1 : -1));
-  const first = S.level === "person" ? ["Counsellor", "Team", "Vertical"] : S.level === "team" ? ["Team", "Vertical"] : ["Vertical"];
-  const head = `<thead><tr>${first.map((h) => `<th class="l">${h}</th>`).join("")}${COLS.map(([k, h]) =>
-    `<th data-k="${k}" class="${S.sort === k ? "sorted" : ""}">${h}${S.sort === k ? (S.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}</tr></thead>`;
-  const body = g.map(({ k, r, s }) => {
-    const lead = S.level === "person" ? [r.name + (r.role ? ` <span class="muted small">${esc(r.role)}</span>` : ""), r.team, r.vertical]
-      : S.level === "team" ? [r.team, r.vertical] : [r.vertical];
-    const cells = COLS.map(([c, , f], i) => i === 0
-      ? `<td class="num"><span class="bar" style="width:${Math.max(2, (s.revenue / maxRev) * 60)}px"></span>${f(s)}</td>`
-      : `<td class="num">${f(s)}</td>`).join("");
-    return `<tr class="${S.level === "person" ? "click" : ""}" data-e="${esc(k)}">${lead.map((x, i) =>
-      `<td class="l">${i === 0 && S.level === "person" ? x.replace(/^[^<]*/, (m) => esc(m)) : esc(x)}</td>`).join("")}${cells}</tr>`;
-  }).join("");
-  $("board").innerHTML = head + `<tbody>${body || `<tr><td class="l muted" colspan="20">No data for this period.</td></tr>`}</tbody>`;
+  const exp = (x) => ({ ...(lvl === "caller" ? { Caller: x.caller, Type: STATUS[x.status] || x.status } : {}), ...(lvl !== "vertical" ? { Team: x.team } : {}),
+    Vertical: x.vertical, Revenue: x.revenue, "New enrolments": x.enrolments, Payments: x.payments, Share: x.share,
+    "Revenue last year": x.ly_revenue, "Enrolments last year": x.ly_enrolments, Change: x.change });
+  S.export = [{ name: `By ${page.label.toLowerCase()}`, rows: rows.map(exp) }];
+  if (lvl !== "caller") S.export.push({ name: "By period", rows: series.map((x) => ({ Period: periodLabel(x.period, r.grain), "Start date": x.period,
+    ...(lvl === "team" ? { Team: x.team } : {}), Vertical: x.vertical, Revenue: +x.revenue, "New enrolments": +x.enrolments, Payments: +x.payments })) });
+
+  $("board").onclick = (e) => {
+    const th = e.target.closest("th[data-k]");
+    if (th && th.dataset.k) { const key = th.dataset.k; S.sort = { k: key, dir: S.sort.k === key ? -S.sort.dir : -1 }; render(); return; }
+    const tr = e.target.closest("tr.click"); if (tr && +tr.dataset.i >= 0) openCaller(S.rows[+tr.dataset.i]);
+  };
+  const pm = $("pivot-metric"); if (pm) pm.onclick = (e) => { const b = e.target.closest("button"); if (b) { S.pivotMetric = b.dataset.m; render(); } };
 }
 
-function rosterFiltered() {
-  const v = $("f-vertical").value, t = $("f-team").value, p = $("f-person").value;
-  return S.roster.filter((r) => (!v || r.vertical === v) && (!t || r.team === t) && (!p || r.email === p));
-}
-
-async function openDrawer(email) {
-  const person = S.roster.find((r) => r.email === email); if (!person) return;
-  const rows = S.rows.filter((r) => r.email === email);
-  const s = sum(rows);
-  $("d-name").textContent = person.name;
-  $("d-sub").textContent = `${person.role || "Counsellor"} · ${person.team} · ${person.vertical} · ${S.from} to ${S.to}`;
-  $("d-kpis").innerHTML = KPIS.map(([k, label, fmt]) => `<div class="kpi"><div class="k">${esc(label)}</div><div class="v num">${fmt(s[k])}</div></div>`).join("");
+/* ---------- caller drawer ---------- */
+async function openCaller(x) {
+  const r = range();
+  $("d-name").textContent = x.caller;
+  $("d-sub").innerHTML = `${esc(STATUS[x.status] || x.status)} · ${esc(x.team)} · ${esc(x.vertical)}<br>${nice(r.from)} – ${nice(r.to)}, compared with ${nice(r.pf)} – ${nice(r.pt)}`;
+  $("d-kpis").innerHTML = kpi("Revenue", rupees(x.revenue), x.revenue, x.ly_revenue, "same dates last year") +
+    kpi("New enrolments", num(x.enrolments), x.enrolments, x.ly_enrolments, "same dates last year");
   $("drawer").hidden = false;
-  chart("d-trend", trendConfig(rows, S.grain));
-  const { data, error } = await sb.rpc("get_courses", { p_from: S.from, p_to: S.to, p_email: email });
-  $("d-courses").innerHTML = error ? `<tr><td>${esc(error.message)}</td></tr>` :
-    `<thead><tr><th class="l">Course</th><th>Revenue</th><th>New enr.</th><th>Rows</th></tr></thead><tbody>` +
-    (data.map((c) => `<tr><td class="l" style="white-space:normal">${esc(c.course)}</td><td class="num">${rupees(c.revenue)}</td>
-      <td class="num">${num(c.new_enrolments)}</td><td class="num">${num(c.txns)}</td></tr>`).join("") ||
-      `<tr><td class="l muted" colspan="4">No revenue in this period.</td></tr>`) + "</tbody>";
+  const args = { p_vertical: x.vertical, p_team: x.team, p_status: x.status, p_caller: x.caller };
+  const [trend, courses] = await Promise.all([
+    rpcAll("rev_agg", { p_from: r.from, p_to: r.to, p_grain: r.grain, p_group: "none", ...args }),
+    sb.rpc("rev_courses", { p_from: r.from, p_to: r.to, p_caller: x.caller, p_vertical: x.vertical, p_team: x.team }),
+  ]);
+  chart("d-trend", revenueBarsConfig(trend.map((t) => periodLabel(t.period, r.grain)), trend.map((t) => +t.revenue), trend.map((t) => +t.enrolments)));
+  $("d-courses").innerHTML = courses.error ? `<tr><td>${esc(courses.error.message)}</td></tr>` :
+    table([{ h: "Course", f: (c) => `<span style="white-space:normal">${esc(c.course)}</span>`, l: 1 }, { h: "Revenue", f: (c) => rupees(+c.revenue) },
+      { h: "New enr.", f: (c) => num(+c.enrolments) }, { h: "Payments", f: (c) => num(+c.payments) }], courses.data).replace(/^<table>|<\/table>$/g, "");
 }
 
 /* ---------- filters ---------- */
 function fillFilters() {
-  const v = $("f-vertical").value, t = $("f-team").value, p = $("f-person").value;
-  const verts = [...new Set(S.roster.map((r) => r.vertical))].sort();
-  const teams = [...new Set(S.roster.filter((r) => !v || r.vertical === v).map((r) => r.team))].sort();
-  const people = S.roster.filter((r) => (!v || r.vertical === v) && (!t || r.team === t)).sort((a, b) => a.name.localeCompare(b.name));
-  const opts = (el, all, items, sel) => { el.innerHTML = `<option value="">${all}</option>` +
-    items.map(([val, lab]) => `<option value="${esc(val)}" ${val === sel ? "selected" : ""}>${esc(lab)}</option>`).join(""); };
-  opts($("f-vertical"), "All three", verts.map((x) => [x, x]), v);
-  opts($("f-team"), "All teams", teams.map((x) => [x, x]), teams.includes(t) ? t : "");
-  opts($("f-person"), "All counsellors", people.map((x) => [x.email, x.name]), people.some((x) => x.email === p) ? p : "");
+  const v = $("f-vertical").value, t = $("f-team").value;
+  const verts = [...new Set(S.dims.map((d) => d.vertical))].filter(Boolean).sort();
+  const teams = [...new Set(S.dims.filter((d) => !v || d.vertical === v).map((d) => d.team))].filter(Boolean).sort();
+  const opt = (el, all, items, sel) => { el.innerHTML = `<option value="">${all}</option>` +
+    items.map((x) => `<option value="${esc(x)}" ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join(""); };
+  opt($("f-vertical"), "All verticals", verts, v);
+  opt($("f-team"), "All teams", teams, teams.includes(t) ? t : "");
+  const tt = $("f-team").value;
+  const callers = [...new Set(S.dims.filter((d) => (!v || d.vertical === v) && (!tt || d.team === tt)).map((d) => d.caller))].sort();
+  $("callers").innerHTML = callers.slice(0, 2000).map((c) => `<option value="${esc(c)}">`).join("");
+}
+function showFilters() {
+  document.querySelectorAll(".filter-row label[data-for]").forEach((l) => { l.hidden = !l.dataset.for.split(" ").includes(S.page); });
 }
 function fillFy() {
   const cur = +fyStart(istToday()).slice(0, 4);
   for (let y = cur; y >= 2023; y--) $("fy").insertAdjacentHTML("beforeend", `<option value="${y}">FY ${y}-${String(y + 1).slice(2)}</option>`);
 }
-function setFy(y) {
-  const t = istToday(), end = `${+y + 1}-03-31`;
-  $("from").value = `${y}-04-01`; $("to").value = end < t ? end : t; $("grain").value = "month";
-  document.querySelectorAll("#presets button").forEach((b) => b.classList.remove("on"));
-  load();
-}
-function setPreset(p) {
-  const [f, t, g] = preset(p);
-  $("from").value = f; $("to").value = t; $("grain").value = g; $("fy").value = "";
-  document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === p));
-  load();
-}
+function markPreset(p) { document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === p)); }
+function setPreset(p) { const [f, t, g] = preset(p); $("from").value = f; $("to").value = t; $("grain").value = g; $("fy").value = ""; markPreset(p); render(); }
+function setFy(y) { const t = istToday(), end = `${+y + 1}-03-31`; $("from").value = `${y}-04-01`; $("to").value = end < t ? end : t; $("grain").value = "month"; markPreset(null); render(); }
 
-async function loadMeta() {
-  const [{ data: roster }, { data: log }, { data: un }] = await Promise.all([
-    sb.from("roster").select("email,name,role,team,vertical").order("name"),
-    sb.from("refresh_log").select("run_at,status,detail").order("run_at", { ascending: false }).limit(1),
-    sb.from("unmapped_names").select("name,kind,rows,fee_paid,last_seen").order("rows", { ascending: false }),
-  ]);
-  S.roster = roster || [];
-  fillFilters();
-  const last = log && log[0];
-  if (last) {
-    const t = new Date(last.run_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-    $("fresh").textContent = last.status === "ok" ? `Updated ${t} IST` : `Last refresh failed ${t} IST`;
-    $("fresh").className = "chip" + (last.status === "ok" ? "" : " bad");
-    $("fresh").title = last.status === "ok" ? "" : (last.detail?.error || "");
-  } else { $("fresh").textContent = "Not refreshed yet"; $("fresh").className = "chip warn"; }
-  if (un && un.length) {
-    $("unmapped-card").hidden = false;
-    $("unmapped-count").textContent = `${un.length} names`;
-    $("unmapped").innerHTML = `<thead><tr><th class="l">Name as written</th><th class="l">Where</th><th>Rows / calls</th><th>Fee paid</th><th>Last seen</th></tr></thead><tbody>` +
-      un.map((u) => `<tr><td class="l">${esc(u.name)}</td><td class="l">${u.kind === "revenue" ? "Revenue sheet" : "Dialler"}</td>
-        <td class="num">${num(u.rows)}</td><td class="num">${u.kind === "revenue" ? rupees(u.fee_paid) : "–"}</td><td class="num">${esc(u.last_seen || "")}</td></tr>`).join("") + "</tbody>";
-  }
+function setPage(p) {
+  if (!PAGES[p]) p = "overall";
+  S.page = p; S.sort = { k: "revenue", dir: -1 };
+  $("page-title").textContent = PAGES[p].title; document.title = `${PAGES[p].title} · Sales Analytics Dashboard`;
+  document.querySelectorAll(".side nav a").forEach((a) => a.classList.toggle("on", a.dataset.page === p));
+  $("side").classList.remove("open"); $("drawer").hidden = true;
+  showFilters(); render();
 }
 
-function showError(e) { $("fresh").textContent = "Error: " + (e.message || e); $("fresh").className = "chip bad"; }
+/* ---------- Excel ---------- */
+function download() {
+  if (!S.export.length) return;
+  const r = range(), wb = XLSX.utils.book_new();
+  const info = [{ Item: "Page", Value: PAGES[S.page].title }, { Item: "From", Value: r.from }, { Item: "To", Value: r.to },
+    { Item: "Compared with", Value: `${r.pf} to ${r.pt} (same dates last year)` }, { Item: "View by", Value: r.grain }];
+  if (S.page !== "overall") info.push({ Item: "Vertical", Value: $("f-vertical").value || "All" });
+  if (S.page === "team" || S.page === "caller") info.push({ Item: "Team", Value: $("f-team").value || "All" });
+  if (S.page === "caller") info.push({ Item: "Caller type", Value: $("f-status").value || "All" }, { Item: "Caller search", Value: $("f-caller").value || "" });
+  info.push({ Item: "Revenue", Value: "Sum of Fee paid" }, { Item: "New enrolment", Value: 'Enrollment = "New enrollment"' },
+    { Item: "Downloaded", Value: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) + " IST" });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(info), "Filters");
+  for (const s of S.export) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(s.rows), s.name.slice(0, 31));
+  XLSX.writeFile(wb, `Sales_Analytics_${S.page}_${r.from}_to_${r.to}.xlsx`);
+}
 
-/* ---------- auth ---------- */
+/* ---------- freshness + update button ---------- */
+async function lastRun() {
+  const { data } = await sb.from("refresh_log").select("run_at,status,detail").order("run_at", { ascending: false }).limit(1);
+  return data && data[0];
+}
+function showFresh(run) {
+  if (!run) { $("fresh").textContent = "Not refreshed yet"; return; }
+  const t = new Date(run.run_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  $("fresh").innerHTML = run.status === "ok" ? `Data updated ${t} IST` : `<span class="down">Last update failed ${t} IST</span>`;
+  $("fresh").title = run.status === "ok" ? "" : (run.detail?.error || "");
+}
+async function update() {
+  const btn = $("update"); btn.disabled = true;
+  const before = (await lastRun())?.run_at || "";
+  const { data, error } = await sb.rpc("request_refresh");
+  if (error) { $("update-msg").textContent = /token/i.test(error.message) ? "Update isn't set up yet (GitHub token missing in Supabase)." : error.message; btn.disabled = false; return; }
+  $("update-msg").textContent = data === "already_running" ? "An update is already running…" : "Update started. This takes about 3–5 minutes…";
+  const t0 = Date.now();
+  const poll = async () => {
+    const run = await lastRun();
+    if (run && run.run_at > before) { showFresh(run); $("update-msg").textContent = run.status === "ok" ? "Updated." : "Update failed; see the note above.";
+      btn.disabled = false; await loadDims(); render(); return; }
+    if (Date.now() - t0 > 15 * 60e3) { $("update-msg").textContent = "Still running; check back in a few minutes."; btn.disabled = false; return; }
+    setTimeout(poll, 20000);
+  };
+  setTimeout(poll, 30000);
+}
+
+/* ---------- theme ---------- */
+const SUN = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`;
+const MOON = `<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>`;
+function themeButton() { const dark = document.documentElement.dataset.theme !== "light"; $("theme").innerHTML = dark ? `${SUN} Light` : `${MOON} Dark`; }
+$("theme").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next; try { localStorage.setItem("sa-theme", next); } catch (_) {}
+  themeButton(); render();
+});
+
+/* ---------- auth + start ---------- */
+async function loadDims() { try { S.dims = await rpcAll("rev_dims", {}); fillFilters(); } catch (_) {} }
 async function start() {
+  themeButton();
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { $("auth").hidden = false; $("app").hidden = true; return; }
   const { data: ok } = await sb.rpc("is_allowed");
-  if (!ok) {
-    $("auth").hidden = false; $("app").hidden = true;
-    $("auth-msg").textContent = `${session.user.email} is signed in but not on the allowed list. Ask Amit to add it.`;
-    return;
-  }
+  if (!ok) { $("auth").hidden = false; $("app").hidden = true;
+    $("auth-msg").textContent = `${session.user.email} is signed in but not on the allowed list. Ask Amit to add it.`; return; }
   $("auth").hidden = true; $("app").hidden = false;
-  fillFy();
-  await loadMeta();
-  setPreset("month");
+  fillFy(); showFresh(await lastRun()); await loadDims();
+  const [f, t, g] = preset("month"); $("from").value = f; $("to").value = t; $("grain").value = g; markPreset("month");
+  setPage(location.hash.slice(1));
 }
-
 $("auth-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  $("auth-msg").textContent = "Signing in…";
+  e.preventDefault(); $("auth-msg").textContent = "Signing in…";
   const { error } = await sb.auth.signInWithPassword({ email: $("auth-email").value.trim().toLowerCase(), password: $("auth-pass").value });
-  $("auth-msg").textContent = error ? error.message : "";
-  if (!error) start();
+  $("auth-msg").textContent = error ? error.message : ""; if (!error) start();
 });
 $("auth-signup").addEventListener("click", async () => {
   const email = $("auth-email").value.trim().toLowerCase(), password = $("auth-pass").value;
@@ -370,31 +446,17 @@ $("auth-signup").addEventListener("click", async () => {
 $("signout").addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
 
 /* ---------- events ---------- */
+window.addEventListener("hashchange", () => setPage(location.hash.slice(1)));
 document.querySelectorAll("#presets button").forEach((b) => b.addEventListener("click", () => setPreset(b.dataset.p)));
 $("fy").addEventListener("change", (e) => { if (e.target.value) setFy(e.target.value); });
-["from", "to"].forEach((id) => $(id).addEventListener("change", () => { $("fy").value = ""; }));
-["from", "to", "grain"].forEach((id) => $(id).addEventListener("change", () => {
-  document.querySelectorAll("#presets button").forEach((b) => b.classList.remove("on")); load(); }));
-["f-vertical", "f-team", "f-person"].forEach((id) => $(id).addEventListener("change", () => { fillFilters(); render(); }));
-document.querySelectorAll("#level button").forEach((b) => b.addEventListener("click", () => {
-  S.level = b.dataset.l; document.querySelectorAll("#level button").forEach((x) => x.classList.toggle("on", x === b)); renderBoard(); }));
-$("board").addEventListener("click", (e) => {
-  const th = e.target.closest("th[data-k]");
-  if (th) { const k = th.dataset.k; S.dir = S.sort === k ? -S.dir : -1; S.sort = k; renderBoard(); return; }
-  const tr = e.target.closest("tr.click"); if (tr) openDrawer(tr.dataset.e);
-});
-document.querySelectorAll("#cmp-level button").forEach((b) => b.addEventListener("click", () => {
-  S.cmpLevel = b.dataset.l; document.querySelectorAll("#cmp-level button").forEach((x) => x.classList.toggle("on", x === b)); renderCompare(); }));
-document.querySelectorAll("#cmp-metric button").forEach((b) => b.addEventListener("click", () => {
-  S.cmpMetric = b.dataset.m; document.querySelectorAll("#cmp-metric button").forEach((x) => x.classList.toggle("on", x === b)); renderCompare(); }));
+["from", "to"].forEach((id) => $(id).addEventListener("change", () => { $("fy").value = ""; markPreset(null); render(); }));
+$("grain").addEventListener("change", render);
+["f-vertical", "f-team"].forEach((id) => $(id).addEventListener("change", () => { fillFilters(); render(); }));
+$("f-status").addEventListener("change", render);
+let typing; $("f-caller").addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(render, 350); });
+$("download").addEventListener("click", download);
+$("update").addEventListener("click", update);
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
-$("theme").addEventListener("click", () => {
-  const root = document.documentElement;
-  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-  root.dataset.theme = dark ? "light" : "dark";
-  try { localStorage.setItem("cp-theme", root.dataset.theme); } catch (_) {}
-  if (S.rows.length) render();
-});
-try { const t = localStorage.getItem("cp-theme"); if (t) document.documentElement.dataset.theme = t; } catch (_) {}
+$("menu").addEventListener("click", () => $("side").classList.toggle("open"));
 
 start();
