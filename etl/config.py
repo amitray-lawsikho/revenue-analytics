@@ -34,7 +34,8 @@ REVENUE_COLUMNS = {
     "caller": ("caller name",),        # prefix match: "Caller name (for ops) for enrollment link circulation"
     "enrollment": ("enrollment",),
     "source": ("source",),
-    "vertical": ("vertical",),        # Combined only; used to spot unmatched names in scope
+    "team": ("team",),                # Combined only; used for callers no longer in Teamlist
+    "vertical": ("vertical",),        # Combined only; used for callers no longer in Teamlist
 }
 
 ROSTER_COLUMNS = {

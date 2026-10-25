@@ -41,25 +41,35 @@ def test_roster_uses_current_team_and_scope():
     assert n2e["chitra n"] == "c@x.in" and "bilal khan" in all_names
 
 
-def test_revenue_mapping_rules():
-    _, n2e, all_names = build_roster(ROSTER, SCOPE)
+def test_revenue_attribution_rules():
+    roster, n2e, _ = build_roster(ROSTER)
+    by_email = {r["email"]: r for r in roster}
     unmapped = defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None})
     raw = [
         {"_row": 2, "date": "05/10/2026", "caller": "asha rao", "fee_paid": "10,000", "enrollment": "New enrollment",
-         "vertical": "Team Mayur"},  # old team in the sheet is ignored: credited to current roster
+         "team": "Old team", "vertical": "Team Mayur"},           # current caller: Teamlist team, not the sheet's
         {"_row": 3, "date": "06/10/2026", "caller": "Asha Rao", "fee_paid": "5000",
-         "enrollment": "Bootcamp collections - balance payments"},
-        {"_row": 4, "date": "06/10/2026", "caller": "Bilal Khan", "fee_paid": "999", "enrollment": "New enrollment"},
-        {"_row": 5, "date": "07/10/2026", "caller": "Asha R", "fee_paid": "700", "enrollment": "New enrollment",
-         "vertical": "Team Uzair"},
-        {"_row": 6, "date": "01/03/2026", "caller": "Asha Rao", "fee_paid": "1", "enrollment": "New enrollment"},
+         "enrollment": "New enrollment - balance payment"},     # revenue only
+        {"_row": 4, "date": "06/10/2026", "caller": "Direct", "fee_paid": "999", "enrollment": "Other revenue",
+         "team": "Bootcamp - Direct", "vertical": "Direct"},
+        {"_row": 5, "date": "07/10/2026", "caller": "Old Person", "fee_paid": "700", "enrollment": "New enrollment",
+         "team": "Elite", "vertical": "Team Uzair"},              # resigned: sheet's own team
+        {"_row": 6, "date": "07/10/2026", "caller": "", "fee_paid": "300", "enrollment": ""},
+        {"_row": 7, "date": "01/03/2026", "caller": "Asha Rao", "fee_paid": "1", "enrollment": "New enrollment"},
+        {"_row": 8, "date": "", "caller": "Asha Rao", "fee_paid": "1", "enrollment": "New enrollment"},
+        {"_row": 9, "date": "08/10/2026", "caller": "Asha", "fee_paid": "50", "enrollment": "New enrollment"},
     ]
-    rows = revenue_rows(raw, "Combined", lambda d: d >= date(2026, 4, 1), n2e, SCOPE, all_names, "L1", unmapped)
-    assert [r["fee_paid"] for r in rows] == [10000, 5000]
-    assert [r["is_new_enrolment"] for r in rows] == [True, False]
-    assert all(r["email"] == "a@x.in" for r in rows)
-    assert dict(unmapped)[("Asha R", "revenue")]["fee_paid"] == 700  # in-scope vertical, unknown name: reported
-    assert ("Bilal Khan", "revenue") not in unmapped                  # other vertical: silently out of scope
+    rows = revenue_rows(raw, "Combined", lambda d: d >= date(2026, 4, 1), n2e, by_email, "L1", unmapped)
+    got = [(r["caller"], r["caller_status"], r["team"], r["vertical"], r["fee_paid"], r["is_new_enrolment"]) for r in rows]
+    assert got == [
+        ("Asha Rao", "current", "Elite", "Team Uzair", 10000, True),
+        ("Asha Rao", "current", "Elite", "Team Uzair", 5000, False),
+        ("Direct", "direct", "Bootcamp - Direct", "Direct", 999, False),
+        ("Old Person", "resigned", "Elite", "Team Uzair", 700, True),
+        ("Lead details not available", "no caller", "Not assigned", "Not assigned", 300, False),
+        ("Asha", "resigned", "Resigned – team unknown", "Resigned – team unknown", 50, True),  # exact names only
+    ]
+    assert ("Old Person", "revenue") in unmapped and ("Direct", "revenue") not in unmapped
 
 
 def test_calls_mapping_adds_spellings_and_skips_others():

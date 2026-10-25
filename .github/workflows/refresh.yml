@@ -1,13 +1,17 @@
-name: Refresh counsellor performance
+name: Refresh Sales Analytics Dashboard
 
-# Started at exact times by cron-job.org (09:00, 13:00, 17:00, 20:00 IST) through GitHub's API,
-# or by hand with "Run workflow". No GitHub cron here: it runs late.
+# Started at exact times by Supabase (pg_cron: 09:00 full, 13:00, 17:00, 20:00, 23:00 IST), by the dashboard's
+# Update button, or by hand with "Run workflow". No GitHub cron here: it runs late.
 on:
   workflow_dispatch:
     inputs:
       call_days:
         description: "Days of calling data to re-read (BigQuery keeps about 60)"
         default: "7"
+        required: false
+      full:
+        description: "Also reload the past FY tabs (true/false)"
+        default: "false"
         required: false
 
 concurrency:
@@ -27,7 +31,7 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - run: python -m pytest -q
       - name: Refresh
-        run: python -m etl.refresh --call-days "${{ inputs.call_days || '7' }}"
+        run: python -m etl.refresh --call-days "${{ inputs.call_days || '7' }}" --full "${{ inputs.full || 'false' }}"
         env:
           BQ_CREDENTIALS: ${{ secrets.BQ_CREDENTIALS }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
