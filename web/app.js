@@ -6,10 +6,14 @@ const PAGES = {
   vertical: { title: "Vertical Wise Performance", level: "vertical", label: "Vertical" },
   team: { title: "Teamwise Performance", level: "team", label: "Team" },
   caller: { title: "Caller Wise Performance", level: "caller", label: "Caller" },
+  iit: { title: "IIT Sold", level: "iit" },
 };
+const LEVELS = { vertical: "Vertical", team: "Team", caller: "Caller" };
+const MODES = { all: "Revenue (Fee paid)", calling: "Calling revenue", collection: "Collection revenue", other: "Other revenue", iit: "IIT revenue" };
+const COLLECTION_VERTICAL = /mayur|anmol/i;   // collection teams (Team Mayur, Team Anmol)
 const STATUS = { current: "Current", resigned: "Resigned", direct: "Direct", "no caller": "No caller details" };
 const GRAINS = { day: "Day", part: "Part of month", month: "Month", fy: "Financial year" };
-const S = { page: "overall", dims: [], charts: {}, sort: { k: "revenue", dir: -1 }, pivotMetric: "revenue", seq: 0, cgrain: "month",
+const S = { page: "overall", dims: [], charts: {}, sort: { k: "revenue", dir: -1 }, pivotMetric: "revenue", seq: 0, cgrain: "month", dgrain: "month", iitLevel: "team",
   sel: { vertical: new Set(), team: new Set(), caller: new Set() } };
 
 /* ---------- format ---------- */
@@ -69,10 +73,18 @@ function preset(p) {
 async function rpcJson(fn, args) { const { data, error } = await sb.rpc(fn, args); if (error) throw error; return data || []; }
 const CACHE = new Map();   // same filters again = instant (cleared when new data arrives)
 function agg(args) {
-  const a = { p_verticals: null, p_teams: null, p_status: null, p_callers: null, ...args }, key = JSON.stringify(a);
+  const a = { p_verticals: null, p_teams: null, p_status: null, p_callers: null, p_iit: false, ...args }, key = JSON.stringify(a);
   if (!CACHE.has(key)) CACHE.set(key, rpcJson("rev_aggm_json", a).catch((e) => { CACHE.delete(key); throw e; }));
   return CACHE.get(key);
 }
+/* Revenue type / IIT view: the summary rows carry every split, so switching costs no extra query. */
+const mode = () => (S.page === "iit" ? "iit" : ($("f-rtype").value || "all"));
+function vw(rows, m) {
+  if (m === "all") return rows;
+  return rows.map((r) => m === "iit" ? { ...r, revenue: +r.iit_rev, enrolments: +r.iit_enrol, payments: +r.iit_pay }
+    : { ...r, revenue: +r[m + "_rev"], enrolments: m === "calling" ? +r.enrolments : 0 }).filter((r) => r.revenue || r.enrolments);
+}
+const aggV = (args, m = mode()) => agg({ ...args, p_iit: m === "iit" }).then((rows) => vw(rows, m));
 function range() { const from = $("from").value, to = $("to").value; return { from, to, pf: lastYear(from), pt: lastYear(to), grain: $("grain").value }; }
 const arr = (set) => (set.size ? [...set] : null);
 function filters(level) {
@@ -82,8 +94,9 @@ function filters(level) {
   if (level === "caller") { f.p_status = $("f-status").value || null; f.p_callers = arr(S.sel.caller); }
   return f;
 }
-const tot = (rows) => rows.reduce((a, r) => ({ revenue: a.revenue + Number(r.revenue || 0),
-  enrolments: a.enrolments + Number(r.enrolments || 0), payments: a.payments + Number(r.payments || 0) }), { revenue: 0, enrolments: 0, payments: 0 });
+const SUMS = ["revenue", "enrolments", "payments", "calling_rev", "collection_rev", "other_rev", "iit_rev", "iit_enrol", "iit_bal", "iit_pay"];
+const tot = (rows) => rows.reduce((a, r) => { SUMS.forEach((k) => (a[k] += Number(r[k] || 0))); return a; },
+  Object.fromEntries(SUMS.map((k) => [k, 0])));
 
 /* ---------- charts ---------- */
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -145,9 +158,9 @@ function groupedBars(labels, sets, rotateTicks) {  // sets: [{label, color, rev[
 }
 
 /* ---------- page shell ---------- */
-function kpi(label, valueHtml, cur, prev, prevText, periodText) {
-  return `<div class="kpi"><div class="k">${esc(label)}</div><div class="v">${valueHtml}</div>${periodText ? `<div class="p">${esc(periodText)}</div>` : ""}
-    ${prevText ? `<div class="d">${chHtml(change(cur, prev))} vs ${esc(prevText)}</div>` : ""}</div>`;
+function kpi(label, valueHtml, cur, prev, prevText, periodText, extra = "", hint = "") {
+  return `<div class="kpi" ${hint ? `title="${esc(hint)}"` : ""}><div class="k">${esc(label)}</div><div class="v">${valueHtml}</div>${periodText ? `<div class="p">${esc(periodText)}</div>` : ""}
+    ${prevText ? `<div class="d">${chHtml(change(cur, prev))} vs ${esc(prevText)}</div>` : ""}${extra ? `<div class="x">${extra}</div>` : ""}</div>`;
 }
 function table(cols, rows, opts = {}) {
   const head = `<thead><tr>${cols.map((c) => `<th class="${c.l ? "l" : ""} ${opts.sort && S.sort.k === c.k ? "sorted" : ""}" data-k="${c.k || ""}">${esc(c.h)}${opts.sort && S.sort.k === c.k ? (S.sort.dir < 0 ? " ↓" : " ↑") : ""}</th>`).join("")}</tr></thead>`;
@@ -165,7 +178,9 @@ async function render() {
   busy(true);
   try {
     if (S.page === "overall") await renderOverall(seq);
-    else { const r = range(); if (!r.from || !r.to || r.from > r.to) return; setSub(); await renderLevel(r, seq, PAGES[S.page]); }
+    else { const r = range(); if (!r.from || !r.to || r.from > r.to) return; setSub();
+      const page = S.page === "iit" ? { level: S.iitLevel, label: LEVELS[S.iitLevel], iit: true } : PAGES[S.page];
+      await renderLevel(r, seq, page); }
   } catch (e) { if (seq === S.seq) $("content").innerHTML = `<div class="card empty">Could not load data: ${esc(e.message || e)}</div>`; }
   if (seq === S.seq) busy(false);
 }
@@ -182,8 +197,13 @@ const sumRange = (days, a, b) => tot(days.filter((d) => d.period >= a && d.perio
 
 async function renderOverall(seq) {
   const today = istToday();
-  const days = await agg({ p_from: "2023-04-01", p_to: today, p_grain: "day", p_group: "none" });
+  const ms0 = today.slice(0, 8) + "01", fs0 = fyStart(today), st = (f, t) => agg({ p_from: f, p_to: t, p_grain: "none", p_group: "status" });
+  const [days, dmC, dmP, dfC, dfP, fyStatus] = await Promise.all([
+    agg({ p_from: "2023-04-01", p_to: today, p_grain: "day", p_group: "none" }),
+    st(ms0, today), st(lastYear(ms0), lastYear(today)), st(fs0, today), st(lastYear(fs0), lastYear(today)),
+    agg({ p_from: "2023-04-01", p_to: today, p_grain: "fy", p_group: "status" })]);
   if (seq !== S.seq) return;
+  const direct = (rows) => rows.filter((x) => x.status === "direct").reduce((a, x) => a + +x.revenue, 0);
   const curFy = fyOf(today), fys = [...new Set(days.map((d) => fyOf(d.period)))].sort();
   if (!fys.includes(curFy)) fys.push(curFy);
   const curMonth = +today.slice(5, 7), curDay = +today.slice(8, 10), mIdx = (curMonth + 8) % 12;
@@ -206,6 +226,13 @@ async function renderOverall(seq) {
   const monthYear = (y) => (curMonth >= 4 ? y : y + 1);
   const lastDay = daysIn(+today.slice(0, 4), curMonth);
   const sameLabel = `1 Apr – ${D(today).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}`;
+  const fyPrevText = `${nice(lastYear(fs))} – ${nice(lastYear(today))}`;
+  const typeCard = (label, fc, fp, mc, mp, hint) => kpi(`${label} · ${fyName(curFy)}`, money(fc), fc, fp, fyPrevText, `${nice(fs)} – ${nice(today)}`,
+    `${monthName}: <b>${rupees(mc)}</b> ${chHtml(change(mc, mp))} vs same dates last year`, hint);
+  const fyType = new Map();
+  for (const x of fyStatus) { const y = +String(x.period).slice(0, 4), o = fyType.get(y) || { y, calling: 0, collection: 0, other: 0, direct: 0, total: 0 };
+    o.calling += +x.calling_rev; o.collection += +x.collection_rev; o.other += +x.other_rev; o.total += +x.revenue;
+    if (x.status === "direct") o.direct += +x.revenue; fyType.set(y, o); }
 
   $("page-sub").innerHTML = `All payments · every comparison uses <b>the same dates in earlier years</b>`;
   $("content").innerHTML = `
@@ -214,6 +241,13 @@ async function renderOverall(seq) {
       ${kpi(`New enrolments · ${monthName} ${today.slice(0, 4)}`, num(mCur.enrolments), mCur.enrolments, mPrev.enrolments, `${nice(lastYear(ms))} – ${nice(lastYear(today))}`, `${nice(ms)} – ${nice(today)}`)}
       ${kpi(`Revenue · ${fyName(curFy)}`, money(fCur.revenue), fCur.revenue, fPrev.revenue, `${nice(lastYear(fs))} – ${nice(lastYear(today))}`, `${nice(fs)} – ${nice(today)}`)}
       ${kpi(`New enrolments · ${fyName(curFy)}`, num(fCur.enrolments), fCur.enrolments, fPrev.enrolments, `${nice(lastYear(fs))} – ${nice(lastYear(today))}`, `${nice(fs)} – ${nice(today)}`)}
+    </section>
+    <h4 class="section-h">Revenue by type</h4>
+    <section class="kpis k4">
+      ${typeCard("Calling revenue", fCur.calling_rev, fPrev.calling_rev, mCur.calling_rev, mPrev.calling_rev, "Enrollment = New enrollment or New enrollment - balance payment")}
+      ${typeCard("Collection revenue", fCur.collection_rev, fPrev.collection_rev, mCur.collection_rev, mPrev.collection_rev, "Enrollment = Bootcamp collections - balance payments or Community collections - balance payments")}
+      ${typeCard("Other revenue", fCur.other_rev, fPrev.other_rev, mCur.other_rev, mPrev.other_rev, "Other revenue, blank Enrollment and older labels")}
+      ${typeCard("Direct payments", direct(dfC), direct(dfP), direct(dmC), direct(dmP), "Caller name Direct, Bootcamp - Direct, Bootcamp - Direct-International and the Bootcamp Joining sheet: payments with no caller. Part of the three types above.")}
     </section>
     <section class="grid2">
       <div class="card"><div class="card-h"><h3>Revenue by financial year</h3><span class="muted small">Label = new enrolments · ${fyName(curFy)} in progress</span></div>
@@ -226,6 +260,11 @@ async function renderOverall(seq) {
           list.map((x, i) => ({ ...x, n: fyName(x.y), g: i && x.y !== curFy ? change(x.revenue, list[i - 1].revenue) : null, gs: i ? change(x.ytdRev, list[i - 1].ytdRev) : null })))}</div>
         <p class="note">Full-year growth stays blank for ${fyName(curFy)} until the year ends; read the same-dates columns.</p></div>
     </section>
+    <section class="card"><div class="card-h"><h3>Revenue type by financial year</h3><span class="muted small">Calling + Collection + Other = total · Direct payments sit inside these types</span></div>
+      <div class="table-wrap">${table([{ h: "Financial year", k: "n", l: 1 }, { h: "Calling", f: (x) => money(x.calling) }, { h: "Calling share", f: (x) => pct(x.calling / (x.total || 1)) },
+        { h: "Collection", f: (x) => money(x.collection) }, { h: "Collection share", f: (x) => pct(x.collection / (x.total || 1)) },
+        { h: "Other", f: (x) => money(x.other) }, { h: "Total", f: (x) => money(x.total) }, { h: "Direct payments", f: (x) => money(x.direct) }],
+        [...fyType.values()].sort((a, b) => a.y - b.y).map((x) => ({ ...x, n: fyName(x.y) + (x.y === curFy ? " (so far)" : "") })))}</div></section>
     <section class="card"><div class="card-h"><h3>${fyName(curFy)} month by month, compared with earlier years</h3>
       <span class="muted small">Gold = ${fyName(curFy)} · number on each bar = new enrolments of that year</span></div>
       <div class="chart-box" style="height:400px"><canvas id="ch-month"></canvas></div>
@@ -259,18 +298,22 @@ async function renderOverall(seq) {
 const keyOf = { vertical: (x) => x.vertical, team: (x) => `${x.team}||${x.vertical}`, caller: (x) => `${x.caller}||${x.caller_status}||${x.team}||${x.vertical}` };
 const trendGrain = (g, r) => (g === "day" && spanDays(r.from, r.to) > 62 ? "month" : g);   // never hundreds of day columns
 async function renderLevel(r, seq, page) {
-  const lvl = page.level, base = { p_group: lvl, ...filters(lvl) }, isCaller = lvl === "caller";
-  const tg = trendGrain(isCaller ? S.cgrain : r.grain, r);
-  const [cur, ly, series] = await Promise.all([
-    agg({ p_from: r.from, p_to: r.to, p_grain: "none", ...base }),
-    agg({ p_from: r.pf, p_to: r.pt, p_grain: "none", ...base }),
-    isCaller ? null : agg({ p_from: r.from, p_to: r.to, p_grain: tg, ...base }),
+  const lvl = page.level, m = mode(), isIit = m === "iit", base = { p_group: lvl, ...filters(page.iit ? "caller" : lvl) }, isCaller = lvl === "caller";
+  const tg = trendGrain(isCaller ? S.cgrain : r.grain, r), hasEnr = ["all", "calling", "iit"].includes(m);
+  if (!hasEnr) S.pivotMetric = "revenue";
+  const E = (v) => (hasEnr ? v : "");   // collection / other revenue has no enrolments: no "0" labels
+  const [cur, ly, series, iitCourses] = await Promise.all([
+    aggV({ p_from: r.from, p_to: r.to, p_grain: "none", ...base }),
+    aggV({ p_from: r.pf, p_to: r.pt, p_grain: "none", ...base }),
+    isCaller ? null : aggV({ p_from: r.from, p_to: r.to, p_grain: tg, ...base }),
+    isIit ? courses({ p_from: r.from, p_to: r.to, ...filters("caller"), p_iit: true }) : null,
   ]);
   if (seq !== S.seq) return;
   const k = keyOf[lvl], lyBy = new Map(ly.map((x) => [k(x), x]));
   let rows = cur.map((x) => { const l = lyBy.get(k(x));
     return { key: k(x), vertical: x.vertical, team: x.team, caller: x.caller, status: x.caller_status,
-      revenue: +x.revenue, enrolments: +x.enrolments, payments: +x.payments, ly_revenue: l ? +l.revenue : 0, ly_enrolments: l ? +l.enrolments : 0 }; });
+      revenue: +x.revenue, enrolments: +x.enrolments, payments: +x.payments, ly_revenue: l ? +l.revenue : 0, ly_enrolments: l ? +l.enrolments : 0,
+      calling_rev: +x.calling_rev, collection_rev: +x.collection_rev, other_rev: +x.other_rev, iit_bal: +x.iit_bal, ly_iit_bal: l ? +l.iit_bal : 0 }; });
   const c = tot(rows), pTot = tot(ly), all = c.revenue || 1;
   rows.forEach((x) => { x.share = x.revenue / all; x.change = change(x.revenue, x.ly_revenue); });
   rows.sort((a, b) => S.sort.dir * (((a[S.sort.k] ?? -Infinity) > (b[S.sort.k] ?? -Infinity)) ? 1 : -1));
@@ -287,7 +330,7 @@ async function renderLevel(r, seq, page) {
     trendKeys = (S.sel.caller.size ? byRev.slice(0, 15) : people.slice(0, 8)).map((x) => x.key);
     heat = byRev.slice(0, 25);
     const names = [...new Set([...heat, ...rows.filter((x) => trendKeys.includes(x.key))].map((x) => x.caller))];
-    ser = names.length ? await agg({ p_from: r.from, p_to: r.to, p_grain: tg, ...base, p_callers: names }) : [];
+    ser = names.length ? await aggV({ p_from: r.from, p_to: r.to, p_grain: tg, ...base, p_callers: names }) : [];
     if (seq !== S.seq) return;
   }
   const periods = [...new Set(ser.map((x) => x.period))].sort();
@@ -299,13 +342,18 @@ async function renderLevel(r, seq, page) {
     { h: "Type", l: 1, f: (x) => x._total ? "" : `<span class="badge ${x.status === "no caller" ? "" : esc(x.status)}">${esc(STATUS[x.status] || x.status)}</span>` });
   if (lvl !== "vertical") cols.push({ h: "Team", k: "team", l: 1 });
   cols.push({ h: "Vertical", k: "vertical", l: 1 },
-    { h: "Revenue", k: "revenue", f: (x) => money(x.revenue) }, { h: "New enrolments", k: "enrolments", f: (x) => num(x.enrolments) });
-  if (!isCaller) cols.push({ h: "Payments", k: "payments", f: (x) => num(x.payments) });
+    { h: isIit ? "IIT revenue" : m === "all" ? "Revenue" : MODES[m], k: "revenue", f: (x) => money(x.revenue) },
+    ...(hasEnr ? [{ h: isIit ? "IIT new enrolments" : "New enrolments", k: "enrolments", f: (x) => num(x.enrolments) }] : []));
+  if (isIit) cols.push({ h: "IIT balance payments", k: "iit_bal", f: (x) => num(x.iit_bal) }, { h: "IIT payments", k: "payments", f: (x) => num(x.payments) });
+  if (m === "all") cols.push({ h: "Calling", k: "calling_rev", f: (x) => money(x.calling_rev) }, { h: "Collection", k: "collection_rev", f: (x) => money(x.collection_rev) },
+    { h: "Other", k: "other_rev", f: (x) => money(x.other_rev) });
+  if (!isCaller && m === "all") cols.push({ h: "Payments", k: "payments", f: (x) => num(x.payments) });
   cols.push({ h: "Share", k: "share", f: (x) => pct(x.share) },
-    { h: "Revenue last year", k: "ly_revenue", f: (x) => money(x.ly_revenue) }, { h: "Enrolments last year", k: "ly_enrolments", f: (x) => num(x.ly_enrolments) },
+    { h: "Revenue last year", k: "ly_revenue", f: (x) => money(x.ly_revenue) }, ...(hasEnr ? [{ h: "Enrolments last year", k: "ly_enrolments", f: (x) => num(x.ly_enrolments) }] : []),
     { h: "Change", k: "change", f: (x) => chHtml(x.change) });
   const totalRow = { _total: 1, _i: -1, caller: "Total", team: lvl === "team" ? "Total" : "", vertical: lvl === "vertical" ? "Total" : "",
-    revenue: c.revenue, enrolments: c.enrolments, payments: c.payments, share: 1, ly_revenue: pTot.revenue, ly_enrolments: pTot.enrolments, change: change(c.revenue, pTot.revenue) };
+    revenue: c.revenue, enrolments: c.enrolments, payments: c.payments, share: 1, ly_revenue: pTot.revenue, ly_enrolments: pTot.enrolments, change: change(c.revenue, pTot.revenue),
+    calling_rev: c.calling_rev, collection_rev: c.collection_rev, other_rev: c.other_rev, iit_bal: c.iit_bal };
 
   // vertical/team trend: one bar per group (every vertical; the 10 biggest teams + Others)
   const bigKeys = (lvl === "vertical" ? byRev : top.slice(0, 10)).map((x) => x.key), grp = new Map();
@@ -326,15 +374,29 @@ async function renderLevel(r, seq, page) {
     <section class="card"><div class="card-h"><h3>Top 25 callers by ${GRAINS[tg].toLowerCase()}</h3><span class="muted small">Darker = more revenue · small figure = new enrolments</span></div>
       <div class="table-wrap heat">${table([{ h: "Caller", k: "caller", l: 1 }, ...periods.map((p) => ({ h: periodLabel(p, tg), f: (x) => {
           const v = cell.get(x.key + "@" + p); if (!v) return "";
-          return `<span title="${full(+v.revenue)} · ${num(+v.enrolments)} new enrolments">${rupees(+v.revenue)}<small>${num(+v.enrolments)} enr</small></span>`; } })),
+          return `<span title="${full(+v.revenue)}${hasEnr ? ` · ${num(+v.enrolments)} new enrolments` : ""}">${rupees(+v.revenue)}${hasEnr ? `<small>${num(+v.enrolments)} enr</small>` : ""}</span>`; } })),
         { h: "Total", f: (x) => money(x.revenue) }], heat)}</div></section>`;
 
+  const enrLabel = isIit ? "IIT new enrolments" : m === "all" || m === "calling" ? "New enrolments" : "";
+  const iitSplit = isIit ? (() => {   // collection teams (Mayur, Anmol) vs sales teams
+    const part = (list, coll) => tot(list.filter((x) => COLLECTION_VERTICAL.test(x.vertical || "") === coll));
+    const sc = part(rows, false), sp = part(ly, false), cc = part(rows, true), cp = part(ly, true);
+    return `<h4 class="section-h">Sales teams vs collection teams</h4><section class="kpis k4">
+      ${kpi("Sales teams · IIT revenue", money(sc.revenue), sc.revenue, sp.revenue, prevText, "All verticals except Team Mayur and Team Anmol",
+        `<b>${num(sc.enrolments)}</b> IIT new enrolments ${chHtml(change(sc.enrolments, sp.enrolments))} · <b>${num(sc.iit_bal)}</b> IIT balance payments`)}
+      ${kpi("Collection teams · IIT revenue", money(cc.revenue), cc.revenue, cp.revenue, prevText, "Team Mayur and Team Anmol", `<b>${num(cc.payments)}</b> IIT payments`)}
+    </section>`; })() : "";
   $("content").innerHTML = `
+    ${page.iit ? `<div class="seg page-tabs" id="iit-level">${Object.entries(LEVELS).map(([k2, t]) => `<button data-l="${k2}" class="${S.iitLevel === k2 ? "on" : ""}">${t} wise</button>`).join("")}</div>` : ""}
     <section class="kpis">
-      ${kpi("Revenue (Fee paid)", money(c.revenue), c.revenue, pTot.revenue, prevText, curText)}
-      ${kpi("New enrolments", num(c.enrolments), c.enrolments, pTot.enrolments, prevText, curText)}
-      ${kpi(`${page.label}s with revenue`, num(rows.filter((x) => x.revenue > 0).length), null, null, "", curText)}
+      ${kpi(MODES[m], money(c.revenue), c.revenue, pTot.revenue, prevText, curText)}
+      ${enrLabel ? kpi(enrLabel, num(c.enrolments), c.enrolments, pTot.enrolments, prevText, curText, isIit ? "New enrollment above ₹800 with an IIT / iHub course" : "") : ""}
+      ${isIit ? kpi("IIT balance payments", num(c.iit_bal), c.iit_bal, pTot.iit_bal, prevText, curText, "New enrollment - balance payments with an IIT / iHub course (upgrades)") : ""}
+      ${m === "all" ? kpi("Calling revenue", money(c.calling_rev), c.calling_rev, pTot.calling_rev, prevText, curText) +
+        kpi("Collection revenue", money(c.collection_rev), c.collection_rev, pTot.collection_rev, prevText, curText) : ""}
+      ${kpi(`${page.label}s with ${isIit ? "IIT revenue" : "revenue"}`, num(rows.filter((x) => x.revenue > 0).length), null, null, "", curText)}
     </section>
+    ${iitSplit}
     <section class="card"><div class="card-h"><h3>${isCaller ? "Top 15 callers" : `Revenue by ${page.label.toLowerCase()}`}</h3>
       <span class="muted small">Gold = selected dates · grey = same dates last year · label = new enrolments and change</span></div>
       <div class="chart-box" style="height:${Math.max(260, 70 + top.length * 42)}px"><canvas id="ch-rank"></canvas></div></section>
@@ -343,11 +405,13 @@ async function renderLevel(r, seq, page) {
       <span class="muted small">One bar per ${page.label.toLowerCase()}${lvl === "team" ? " (10 biggest + Others)" : ""} · number on each bar = its new enrolments${esc(gnote)}</span></div>
       <div class="chart-box" style="height:400px"><canvas id="ch-trend"></canvas></div></section>`}
     <section class="card"><div class="card-h"><h3>${isCaller ? "Caller leaderboard" : `${page.label} table`}</h3>
-      <span class="muted small">${isCaller ? "Click a caller for their trend and courses · " : ""}click a column to sort · hover an amount for the exact figure</span></div>
-      <div class="table-wrap" id="board">${table(cols, [...rows, totalRow], { sort: true, click: isCaller })}</div></section>
+      <span class="muted small">Click a ${page.label.toLowerCase()} for its trend, ${lvl === "vertical" ? "teams and " : lvl === "team" ? "callers and " : ""}courses · click a column to sort · hover an amount for the exact figure</span></div>
+      <div class="table-wrap" id="board">${table(cols, [...rows, totalRow], { sort: true, click: true })}</div></section>
+    ${isIit ? `<section class="card"><div class="card-h"><h3>IIT courses sold</h3><span class="muted small">Course name contains IIT or iHub · top 30 by revenue</span></div>
+      <div class="table-wrap">${courseTable(iitCourses)}</div></section>` : ""}
     ${isCaller ? "" : `<section class="card"><div class="card-h"><h3>${page.label} by period</h3>
       <div class="seg" id="pivot-metric"><button data-m="revenue" class="${metric === "revenue" ? "on" : ""}">Revenue</button>
-      <button data-m="enrolments" class="${metric === "enrolments" ? "on" : ""}">New enrolments</button></div></div>
+      ${hasEnr ? `<button data-m="enrolments" class="${metric === "enrolments" ? "on" : ""}">New enrolments</button>` : ""}</div></div>
       <div class="table-wrap">${table([{ h: page.label, k: "n", l: 1 }, ...periods.map((p) => ({ h: periodLabel(p, tg), f: (x) => pf(x[p]) })), { h: "Total", f: (x) => pf(x.t) }], pivRows)}</div></section>`}`;
 
   if (isCaller) document.querySelectorAll(".heat tbody tr").forEach((tr, ri) => {
@@ -365,7 +429,7 @@ async function renderLevel(r, seq, page) {
         { label: "Same dates last year", data: top.map((x) => x.ly_revenue), backgroundColor: css("--ly"), borderRadius: 3, barPercentage: .9, categoryPercentage: .78 },
       ] },
     options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, layout: { padding: { right: 120 } },
-      plugins: { legend: { position: "bottom" }, barLabels: { dataset: 0, labels: top.map((x) => `${num(x.enrolments)} enr  ${chTxt(x.change)}`) },
+      plugins: { legend: { position: "bottom" }, barLabels: { dataset: 0, labels: top.map((x) => `${hasEnr ? num(x.enrolments) + " enr  " : ""}${chTxt(x.change)}`) },
         tooltip: { callbacks: { label: (cc) => ` ${cc.dataset.label}: ${both(cc.raw)} · ${num(cc.datasetIndex ? top[cc.dataIndex].ly_enrolments : top[cc.dataIndex].enrolments)} enr` } } },
       scales: { x: yRupees(), y: { grid: { display: false }, ticks: { color: css("--ink") } } } },
   });
@@ -374,42 +438,95 @@ async function renderLevel(r, seq, page) {
     const keyName = (key) => key === "Others" ? "Others" : (lvl === "team" ? key.split("||")[0] : key);
     const val = (key, p) => grp.get(key).get(p) || { revenue: 0, enrolments: 0 };
     chart("ch-trend", groupedBars(periods.map((p) => periodLabel(p, tg)), keys.map((key, i) => ({ label: keyName(key),
-      color: key === "Others" ? css("--ly") : pal[i % pal.length], rev: periods.map((p) => val(key, p).revenue), enr: periods.map((p) => val(key, p).enrolments) }))));
+      color: key === "Others" ? css("--ly") : pal[i % pal.length], rev: periods.map((p) => val(key, p).revenue), enr: periods.map((p) => E(val(key, p).enrolments)) }))));
   } else {
     // one cluster per caller, one bar per period (oldest = lightest, latest = gold)
     const tk = trendKeys.map((key) => rows.find((x) => x.key === key)).filter(Boolean);
     const n = periods.length, gold = css("--gold");
     const shade = (i) => n <= 1 ? gold : `color-mix(in srgb, ${gold} ${Math.round(28 + 72 * i / (n - 1))}%, ${css("--panel-2")})`;
     chart("ch-ctrend", groupedBars(tk.map((x) => x.caller.length > 18 ? x.caller.slice(0, 17) + "…" : x.caller), periods.map((p, i) => ({ label: periodLabel(p, tg), color: shade(i),
-      rev: tk.map((x) => +(cell.get(x.key + "@" + p)?.revenue || 0)), enr: tk.map((x) => +(cell.get(x.key + "@" + p)?.enrolments || 0)) })), true));
+      rev: tk.map((x) => +(cell.get(x.key + "@" + p)?.revenue || 0)), enr: tk.map((x) => E(+(cell.get(x.key + "@" + p)?.enrolments || 0))) })), true));
     $("cgrain").onclick = (e) => { const b = e.target.closest("button[data-g]"); if (b) { S.cgrain = b.dataset.g; render(); } };
   }
 
   $("board").onclick = (e) => {
     const th = e.target.closest("th[data-k]");
     if (th && th.dataset.k) { const key = th.dataset.k; S.sort = { k: key, dir: S.sort.k === key ? -S.sort.dir : -1 }; render(); return; }
-    const tr = e.target.closest("tr.click"); if (tr && +tr.dataset.i >= 0) openCaller(S.rows[+tr.dataset.i]);
+    const tr = e.target.closest("tr.click"); if (tr && +tr.dataset.i >= 0) { S.dstack = []; openDetail(S.rows[+tr.dataset.i], lvl); }
   };
+  const il = $("iit-level"); if (il) il.onclick = (e) => { const b = e.target.closest("button[data-l]"); if (b) { S.iitLevel = b.dataset.l; S.sort = { k: "revenue", dir: -1 }; render(); } };
   const pm = $("pivot-metric"); if (pm) pm.onclick = (e) => { const b = e.target.closest("button"); if (b) { S.pivotMetric = b.dataset.m; render(); } };
 }
 
-/* ---------- caller drawer ---------- */
-async function openCaller(x) {
-  const r = range(), tg = trendGrain(S.cgrain, r);
-  $("d-name").textContent = x.caller;
-  $("d-sub").innerHTML = `${esc(STATUS[x.status] || x.status)} · ${esc(x.team)} · ${esc(x.vertical)}<br>${nice(r.from)} – ${nice(r.to)}, compared with ${nice(r.pf)} – ${nice(r.pt)} · by ${GRAINS[tg].toLowerCase()}`;
-  $("d-kpis").innerHTML = kpi("Revenue", money(x.revenue), x.revenue, x.ly_revenue, "same dates last year") +
-    kpi("New enrolments", num(x.enrolments), x.enrolments, x.ly_enrolments, "same dates last year");
-  $("drawer").hidden = false;
-  const [trend, courses] = await Promise.all([
-    agg({ p_from: r.from, p_to: r.to, p_grain: tg, p_group: "none", p_verticals: [x.vertical], p_teams: [x.team], p_status: x.status, p_callers: [x.caller] }),
-    sb.rpc("rev_coursesm", { p_from: r.from, p_to: r.to, p_caller: x.caller, p_verticals: [x.vertical], p_teams: [x.team] }),
-  ]);
-  chart("d-trend", revenueBarsConfig(trend.map((t) => periodLabel(t.period, tg)), trend.map((t) => +t.revenue), trend.map((t) => +t.enrolments)));
-  $("d-courses").innerHTML = courses.error ? `<tr><td>${esc(courses.error.message)}</td></tr>` :
-    table([{ h: "Course", f: (cc) => `<span style="white-space:normal">${esc(cc.course)}</span>`, l: 1 }, { h: "Revenue", f: (cc) => money(+cc.revenue) },
-      { h: "New enr.", f: (cc) => num(+cc.enrolments) }], courses.data).replace(/^<table>|<\/table>$/g, "");
+/* ---------- courses ---------- */
+function courses(args) {
+  const a = { p_caller: null, p_verticals: null, p_teams: null, p_iit: false, p_rev_type: null, ...args };
+  delete a.p_status; delete a.p_callers;
+  if (args.p_callers && args.p_callers.length === 1 && !a.p_caller) a.p_caller = args.p_callers[0];
+  const key = "courses" + JSON.stringify(a);
+  if (!CACHE.has(key)) CACHE.set(key, rpcJson("rev_coursesm", a).catch((e) => { CACHE.delete(key); throw e; }));
+  return CACHE.get(key);
 }
+const courseTable = (list) => table([{ h: "Course", f: (cc) => `<span style="white-space:normal">${esc(cc.course)}</span>`, l: 1 },
+  { h: "Revenue", f: (cc) => money(+cc.revenue) }, { h: "New enr.", f: (cc) => num(+cc.enrolments) }, { h: "Payments", f: (cc) => num(+cc.payments) }], list || []);
+
+/* ---------- drill-down drawer: vertical -> teams -> callers ---------- */
+const KID = { vertical: "team", team: "caller" };
+function joinLy(cur, ly, lvl) {
+  const k = keyOf[lvl], lyBy = new Map(ly.map((x) => [k(x), x]));
+  return cur.map((x) => { const l = lyBy.get(k(x)) || {};
+    return { key: k(x), vertical: x.vertical, team: x.team, caller: x.caller, status: x.caller_status, revenue: +x.revenue, enrolments: +x.enrolments,
+      payments: +x.payments, calling_rev: +x.calling_rev, collection_rev: +x.collection_rev, other_rev: +x.other_rev, iit_bal: +x.iit_bal,
+      ly_revenue: +(l.revenue || 0), ly_enrolments: +(l.enrolments || 0), change: change(+x.revenue, +(l.revenue || 0)) }; })
+    .sort((p, q) => q.revenue - p.revenue);
+}
+async function openDetail(x, lvl) {
+  S.dcur = { x, lvl };
+  const r = range(), m = mode(), tg = trendGrain(S.dgrain, r), seq = (S.dseq = (S.dseq || 0) + 1);
+  const name = lvl === "vertical" ? x.vertical : lvl === "team" ? x.team : x.caller;
+  $("d-kind").textContent = `${LEVELS[lvl]}${m === "all" ? "" : " · " + MODES[m]}`;
+  $("d-name").textContent = name;
+  const where = lvl === "caller" ? `${esc(STATUS[x.status] || x.status)} · ${esc(x.team)} · ${esc(x.vertical)}<br>` : lvl === "team" ? `${esc(x.vertical)}<br>` : "";
+  $("d-sub").innerHTML = `${where}${nice(r.from)} – ${nice(r.to)}, compared with ${nice(r.pf)} – ${nice(r.pt)}${tg !== S.dgrain ? " · shown by month (more than 62 days)" : ""}`;
+  const ly = "same dates last year";
+  $("d-kpis").innerHTML = kpi(MODES[m], money(x.revenue), x.revenue, x.ly_revenue, ly) +
+    (m === "all" || m === "calling" || m === "iit" ? kpi(m === "iit" ? "IIT new enrolments" : "New enrolments", num(x.enrolments), x.enrolments, x.ly_enrolments, ly) : "") +
+    (m === "all" ? kpi("Revenue by type", `<span class="num" style="font-size:18px">Calling ${rupees(x.calling_rev)}</span>`, null, null, "", "",
+      `Collection <b>${rupees(x.collection_rev)}</b> · Other <b>${rupees(x.other_rev)}</b>`) : "") +
+    (m === "iit" ? kpi("IIT balance payments", num(x.iit_bal), null, null, "") : "");
+  $("d-grain").innerHTML = Object.entries(GRAINS).map(([g, t]) => `<button data-g="${g}" class="${S.dgrain === g ? "on" : ""}">${t}</button>`).join("");
+  $("d-back").hidden = !(S.dstack || []).length;
+  const kid = KID[lvl];
+  $("d-kids-card").hidden = !kid;
+  if (kid) { $("d-kids-h").textContent = `${LEVELS[kid]}s in this ${LEVELS[lvl].toLowerCase()}`; $("d-kids").innerHTML = `<p class="muted small">Loading…</p>`; }
+  $("d-courses").innerHTML = ""; $("drawer").hidden = false; $("drawer").scrollTop = 0;
+  const f = { p_verticals: [x.vertical] };
+  if (lvl !== "vertical") f.p_teams = [x.team];
+  if (lvl === "caller") { f.p_status = x.status; f.p_callers = [x.caller]; }
+  const [trend, cs, kc, kl] = await Promise.all([
+    aggV({ p_from: r.from, p_to: r.to, p_grain: tg, p_group: "none", ...f }, m),
+    courses({ p_from: r.from, p_to: r.to, ...f, p_iit: m === "iit", p_rev_type: ["calling", "collection", "other"].includes(m) ? m : null }).catch((e) => ({ error: e })),
+    kid ? aggV({ p_from: r.from, p_to: r.to, p_grain: "none", p_group: kid, ...f }, m) : null,
+    kid ? aggV({ p_from: r.pf, p_to: r.pt, p_grain: "none", p_group: kid, ...f }, m) : null,
+  ]);
+  if (seq !== S.dseq) return;
+  const dEnr = ["all", "calling", "iit"].includes(m);
+  const cfg = revenueBarsConfig(trend.map((t) => periodLabel(t.period, tg)), trend.map((t) => +t.revenue), trend.map((t) => +t.enrolments));
+  if (!dEnr) { cfg.options.plugins.barLabels = null; cfg.options.plugins.tooltip.callbacks.afterLabel = () => ""; }
+  chart("d-trend", cfg);
+  $("d-courses").innerHTML = cs.error ? `<tr><td>${esc(cs.error.message || cs.error)}</td></tr>` : courseTable(cs).replace(/^<table>|<\/table>$/g, "");
+  if (kid) {
+    const kids = joinLy(kc, kl, kid); kids.forEach((k2, i) => (k2._i = i)); S.dkids = kids;
+    const cols = [{ h: LEVELS[kid], l: 1, f: (k2) => esc(kid === "team" ? k2.team : k2.caller) + (kid === "caller" ? ` <span class="badge ${k2.status === "no caller" ? "" : esc(k2.status)}">${esc(STATUS[k2.status] || k2.status)}</span>` : "") },
+      { h: "Revenue", f: (k2) => money(k2.revenue) }, { h: "New enr.", f: (k2) => num(k2.enrolments) },
+      { h: "Last year", f: (k2) => money(k2.ly_revenue) }, { h: "Change", f: (k2) => chHtml(k2.change) }];
+    $("d-kids").innerHTML = table(cols, kids, { click: true });
+  }
+}
+$("d-grain").addEventListener("click", (e) => { const b = e.target.closest("button[data-g]"); if (b && S.dcur) { S.dgrain = b.dataset.g; openDetail(S.dcur.x, S.dcur.lvl); } });
+$("d-kids").addEventListener("click", (e) => { const tr = e.target.closest("tr.click"); if (!tr || !S.dcur) return;
+  (S.dstack = S.dstack || []).push(S.dcur); openDetail(S.dkids[+tr.dataset.i], KID[S.dcur.lvl]); });
+$("d-back").addEventListener("click", () => { const prev = (S.dstack || []).pop(); if (prev) openDetail(prev.x, prev.lvl); });
 
 /* ---------- multi-select filters (with search) ---------- */
 const MS = {
@@ -560,6 +677,7 @@ $("fy").addEventListener("change", (e) => { if (e.target.value) setFy(e.target.v
 ["from", "to"].forEach((id) => $(id).addEventListener("change", () => { $("fy").value = ""; markPreset(null); render(); }));
 $("grain").addEventListener("change", render);
 $("f-status").addEventListener("change", () => { buildOptions(); render(); });
+$("f-rtype").addEventListener("change", () => { $("drawer").hidden = true; render(); });
 $("update").addEventListener("click", update);
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
 $("menu").addEventListener("click", () => {

@@ -13,6 +13,13 @@ COMBINED_TAB = "Combined"
 CONSOLIDATED_SHEET_ID = os.environ.get("CONSOLIDATED_SHEET_ID", "14NJJpwgArsLE5D0aVxC05fnd4CwM83Iz6XomVHfDGxk")
 CONSOLIDATED_TABS = ("Apr2023-Mar2024", "Apr2024-Mar2025", "Apr2025-Mar2026")
 
+# Bootcamp joining fees (direct payments, no caller): one tab per month, "July 2026", "August 2026", ...
+# The "Combined Bootcamp Joining Revenue Sheet" only IMPORTRANGEs these tabs, so we read the source directly.
+BOOTCAMP_SHEET_ID = os.environ.get("BOOTCAMP_SHEET_ID", "1VBYv6x8xWz4BmGZcyaZIVtw_eeG5j4uMcJBmFj7D9Fg")
+BOOTCAMP_START = date(2026, 7, 1)
+BOOTCAMP_SHEET = "Bootcamp Joining"     # value of revenue_txn.sheet for these daily totals
+BOOTCAMP_CALLER = "Bootcamp Joining - Direct"
+
 # Rows on/after this date come from Combined; earlier rows from the Consolidated FY tabs (no double counting).
 CURRENT_FY_START = date.fromisoformat(os.environ.get("CURRENT_FY_START", "2026-04-01"))
 
@@ -27,7 +34,7 @@ BQ_DATASET = os.environ.get("BQ_DATASET", "crm_dashboard")
 
 # Revenue columns we read, found by header text. Customer name, phone and email are never read.
 REVENUE_COLUMNS = {
-    "brand": ("lawsikho/skill arbitrage",),
+    "brand": ("lawsikho/skill arbitrage", "brand"),
     "date": ("date",),
     "course": ("course",),
     "fee_paid": ("fee paid",),

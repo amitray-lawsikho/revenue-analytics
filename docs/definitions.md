@@ -5,13 +5,16 @@ Change these only with Amit's explicit OK, and change `etl/rules.py` / `etl/refr
 | Term | Rule |
 |---|---|
 | Revenue | Sum of `Fee paid`, every payment row (all Enrollment types, incl. "Other revenue" and blank) |
-| New enrolment | A row whose `Enrollment` is exactly "New enrollment" (case and spaces ignored) **and** whose `Fee paid` is above ₹1,500 (₹1,500 or less adds revenue only). "New enrollment - balance payment" and all balance/collection rows add revenue only |
+| New enrolment | A row whose `Enrollment` is exactly "New enrollment" (case and spaces ignored) **and** whose `Fee paid` is above ₹800 (₹800 or less adds revenue only; Amit, 26 Oct 2026, was ₹1,500). "New enrollment - balance payment" and all balance/collection rows add revenue only |
 | Scope | All payments of the organisation (no vertical filter) |
 | Current caller | Revenue "Caller name" matches a `Teamlist` "Caller Name" exactly (case, dots and spaces ignored) or a `name_alias` row. Credited to the caller's **current** Teamlist team and vertical, for all history |
-| Direct | Caller name "Direct": shown as a caller of its own, under the team/vertical written on the sheet row |
+| Revenue type | **Calling** = Enrollment "New enrollment" or "New enrollment - balance payment". **Collection** = "Bootcamp collections - balance payments" or "Community collections - balance payments". **Other** = everything else ("Other revenue", blank, older labels such as "Bootcamp caller - balance payments", "Subsequent installment dig", "2nd installment"). Calling + Collection + Other = Revenue |
+| Direct | Caller name containing the word "Direct" ("Direct", "Bootcamp - Direct", "Bootcamp - Direct-International"): direct payments, not callers; each name is shown as a caller of its own, under the team/vertical written on the sheet row. Overall shows them together in one "Direct payments" card |
+| Bootcamp joining fees | Sheet "Bootcamp Joining 2026 - Revised" (monthly tabs from July 2026; the "Combined Bootcamp Joining Revenue Sheet" only imports these tabs). Stored as daily totals per course, credited to "Bootcamp Joining - Direct" (vertical and team "Bootcamp Joining"). Revenue only, never an enrolment. Dates from 1 Jul 2026 |
+| IIT | A payment whose course name contains "IIT" or "iHub" (any case; "i-hub", "i hub" too). IIT revenue = all such payments. IIT new enrolment = a new enrolment (rule above) with an IIT course. IIT balance payment = a "New enrollment - balance payment" with an IIT course (upgrades where the first payment's course had no IIT). Collection teams = Team Mayur and Team Anmol; all other verticals are sales teams |
 | Lead details not available | Blank caller name (or NA, -, nil): under the sheet row's team/vertical, else "Not assigned" |
 | Resigned | Any other caller name (not in Teamlist): under the sheet row's team/vertical; the past FY tabs have no team column, so "Resigned – team unknown" |
-| Source of rows | Dates from 1 Apr 2026: `Combined` sheet (reloaded every run, so back-dated entries simply appear). Earlier dates: Consolidated FY tabs (reloaded in the 09:00 run). No date is read from both |
+| Source of rows | Dates from 1 Apr 2026: `Combined` sheet (+ bootcamp joining daily totals from 1 Jul 2026) (reloaded every run, so back-dated entries simply appear). Earlier dates: Consolidated FY tabs (reloaded in the 09:00 run). No date is read from both |
 | FY 2023-24 caller | That tab has two caller columns; "Caller name for Sales" is used |
 | Comparison | The same dates one year earlier (e.g. 1 Apr–25 Oct 2026 vs 1 Apr–25 Oct 2025) |
 | Part / Month / Year | Part of month = days 1–10, 11–20, 21–end; year = Indian financial year (Apr–Mar). All dates IST |

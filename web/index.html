@@ -53,6 +53,8 @@
         <a href="#vertical" data-page="vertical"><svg viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h18"/></svg>Vertical Wise Performance</a>
         <a href="#team" data-page="team"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3 19c1-3 3-4 5-4s4 1 5 4M11 19c1-3 3-4 5-4s4 1 5 4"/></svg>Teamwise Performance</a>
         <a href="#caller" data-page="caller"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-4 4-5.5 7-5.5s5.8 1.5 7 5.5"/></svg>Caller Wise Performance</a>
+        <div class="nav-h">Programmes</div>
+        <a href="#iit" data-page="iit"><svg viewBox="0 0 24 24"><path d="M3 9l9-5 9 5-9 5-9-5zM7 11.5V16c1.5 1.5 3 2 5 2s3.5-.5 5-2v-4.5M21 9v5"/></svg>IIT Sold</a>
       </nav>
       <div class="side-foot">
         <button id="update" class="btn primary block"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg>Update data</button>
@@ -86,14 +88,17 @@
           <label>Financial year <select id="fy"><option value="">Custom dates</option></select></label>
           <label>From <input type="date" id="from"></label>
           <label>To <input type="date" id="to"></label>
-          <label data-for="vertical team">View by <select id="grain"><option value="day">Day</option><option value="part">Part of month (1–10, 11–20, 21–end)</option>
+          <label data-for="vertical team iit">View by <select id="grain"><option value="day">Day</option><option value="part">Part of month (1–10, 11–20, 21–end)</option>
             <option value="month">Month</option><option value="fy">Financial year</option></select></label>
-          <div class="lbl" data-for="vertical team caller"><span>Vertical</span><div class="ms" id="ms-vertical"></div></div>
-          <div class="lbl" data-for="team caller"><span>Team</span><div class="ms" id="ms-team"></div></div>
-          <label data-for="caller">Caller type <select id="f-status">
+          <label data-for="vertical team caller">Revenue type <select id="f-rtype">
+            <option value="all">All revenue</option><option value="calling">Calling (new enrolment + its balance)</option>
+            <option value="collection">Collection (bootcamp / community balance)</option><option value="other">Other</option></select></label>
+          <div class="lbl" data-for="vertical team caller iit"><span>Vertical</span><div class="ms" id="ms-vertical"></div></div>
+          <div class="lbl" data-for="team caller iit"><span>Team</span><div class="ms" id="ms-team"></div></div>
+          <label data-for="caller iit">Caller type <select id="f-status">
             <option value="">All</option><option value="current">Current callers</option><option value="resigned">Resigned / not in Teamlist</option>
             <option value="direct">Direct</option><option value="no caller">Lead details not available</option></select></label>
-          <div class="lbl" data-for="caller"><span>Caller</span><div class="ms" id="ms-caller"></div></div>
+          <div class="lbl" data-for="caller iit"><span>Caller</span><div class="ms" id="ms-caller"></div></div>
         </div>
       </section>
 
@@ -102,10 +107,14 @@
     </main>
 
     <aside id="drawer" class="drawer" hidden>
-      <div class="drawer-h"><div><p class="eyebrow">Caller</p><h2 id="d-name"></h2></div><button id="d-close" class="btn ghost sm">✕</button></div>
+      <div class="drawer-h"><div><p class="eyebrow" id="d-kind">Caller</p><h2 id="d-name"></h2></div>
+        <div class="drawer-act"><button id="d-back" class="btn ghost sm" hidden>← Back</button><button id="d-close" class="btn ghost sm">✕</button></div></div>
       <p id="d-sub" class="muted small"></p>
       <div class="kpis" id="d-kpis"></div>
-      <div class="card"><h3>Revenue and new enrolments</h3><div class="chart-box"><canvas id="d-trend"></canvas></div></div>
+      <div class="card"><div class="card-h"><h3>Revenue and new enrolments</h3><div class="seg sm" id="d-grain"></div></div>
+        <div class="chart-box"><canvas id="d-trend"></canvas></div></div>
+      <div class="card" id="d-kids-card"><div class="card-h"><h3 id="d-kids-h"></h3><span class="muted small">Click a row to open it</span></div>
+        <div class="table-wrap" id="d-kids"></div></div>
       <div class="card"><h3>Top courses</h3><div class="table-wrap"><table id="d-courses"></table></div></div>
     </aside>
   </div>

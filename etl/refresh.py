@@ -14,9 +14,10 @@ import os
 import sys
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
+from urllib.parse import quote
 
 from etl import config as C
-from etl.rules import fy_label, is_new_enrolment, norm_name, parse_amount, parse_date
+from etl.rules import fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly", "https://www.googleapis.com/auth/bigquery"]
@@ -59,7 +60,7 @@ def attribute(raw_name: str, sheet_team: str, sheet_vertical: str, name_to_email
     """Who a payment is credited to, and under which team/vertical (docs/definitions.md).
 
     Current caller (exact Teamlist name or alias): Teamlist's current team/vertical, for all history.
-    "Direct": a caller of its own, under the sheet row's team/vertical. Blank: "Lead details not available".
+    Direct names ("Direct", "Bootcamp - Direct", ...): a caller of their own, under the sheet row's team/vertical. Blank: "Lead details not available".
     Any other name: not in Teamlist (resigned), under the sheet row's team/vertical, else "Resigned – team unknown".
     """
     raw = (raw_name or "").strip()
@@ -73,8 +74,8 @@ def attribute(raw_name: str, sheet_team: str, sheet_vertical: str, name_to_email
     if n in NO_CALLER_NAMES:
         return {"email": None, "caller": NO_CALLER, "caller_status": "no caller",
                 "team": st or NOT_ASSIGNED, "vertical": sv or NOT_ASSIGNED}
-    if n == "direct":
-        return {"email": None, "caller": "Direct", "caller_status": "direct",
+    if is_direct(raw):  # "Direct", "Bootcamp - Direct", ...: direct payments, each name a caller of its own
+        return {"email": None, "caller": "Direct" if n == "direct" else re.sub(r"\s+", " ", raw), "caller_status": "direct",
                 "team": st or NOT_ASSIGNED, "vertical": sv or NOT_ASSIGNED}
     return {"email": None, "caller": re.sub(r"\s+", " ", raw), "caller_status": "resigned",
             "team": st or UNKNOWN_TEAM, "vertical": sv or UNKNOWN_TEAM}
@@ -103,8 +104,48 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
             "brand": (r.get("brand") or "").strip(), "course": (r.get("course") or "").strip(),
             "source": (r.get("source") or "").strip(), "enrollment_type": (r.get("enrollment") or "").strip(),
             "is_new_enrolment": is_new_enrolment(r.get("enrollment"), fee), "fee_paid": fee,
+            "rev_type": revenue_type(r.get("enrollment")), "is_iit": is_iit(r.get("course")), "n_payments": 1,
             "sheet": sheet, "load_id": load_id,
         })
+    return out
+
+
+def bootcamp_rows(raw: list[dict], keep, load_id: str) -> list[dict]:
+    """Bootcamp joining fees: one row per (date, brand, course, Enrollment) with the day's total, credited to
+    "Bootcamp Joining - Direct". Revenue only (never a new enrolment). Individual payments are not stored."""
+    from etl import config as C
+    agg: dict[tuple, list] = {}
+    for r in raw:
+        d = parse_date(r.get("date"))
+        if not d or not keep(d):
+            continue
+        k = (d.isoformat(), (r.get("brand") or "").strip(), (r.get("course") or "").strip(), (r.get("enrollment") or "").strip())
+        a = agg.setdefault(k, [0.0, 0])
+        a[0] += parse_amount(r.get("fee_paid"))
+        a[1] += 1
+    return [{
+        "id": hashlib.sha1(f"{C.BOOTCAMP_SHEET}|{'|'.join(k)}".encode()).hexdigest(),
+        "txn_date": k[0], "caller_name_raw": "", "email": None, "caller": C.BOOTCAMP_CALLER, "caller_status": "direct",
+        "team": C.BOOTCAMP_SHEET, "vertical": C.BOOTCAMP_SHEET, "brand": k[1], "course": k[2], "source": "",
+        "enrollment_type": k[3], "is_new_enrolment": False, "fee_paid": round(v[0], 2),
+        "rev_type": revenue_type(k[3]), "is_iit": is_iit(k[2]), "n_payments": v[1],
+        "sheet": C.BOOTCAMP_SHEET, "load_id": load_id,
+    } for k, v in sorted(agg.items())]
+
+
+def bootcamp_tabs(titles: list[str], start: date) -> list[str]:
+    """Monthly tabs ("July 2026", "Aug 2026", ...) from `start` onwards."""
+    out = []
+    for t in titles:
+        try:
+            d = datetime.strptime(" ".join(t.split()), "%B %Y").date()
+        except ValueError:
+            try:
+                d = datetime.strptime(" ".join(t.split()), "%b %Y").date()
+            except ValueError:
+                continue
+        if d >= start.replace(day=1):
+            out.append(t)
     return out
 
 
@@ -217,6 +258,23 @@ def main(argv: list[str] | None = None) -> int:
                 rev += revenue_rows(raw, tab, lambda d: d < C.CURRENT_FY_START, name_to_email, roster_by_email,
                                     load_id, unmapped)
 
+        # Bootcamp joining fees, daily totals only. If the sheet can't be read, keep the totals already stored.
+        boot_ok = False
+        try:
+            meta = sheets.spreadsheets().get(spreadsheetId=C.BOOTCAMP_SHEET_ID, fields="sheets.properties.title").execute()
+            tabs = bootcamp_tabs([x["properties"]["title"] for x in meta.get("sheets", [])], C.BOOTCAMP_START)
+            boot = []
+            for tab in tabs:
+                raw = read_tab(sheets, C.BOOTCAMP_SHEET_ID, tab, C.REVENUE_COLUMNS, ("date", "fee_paid"))
+                boot += bootcamp_rows(raw, lambda d: d >= C.BOOTCAMP_START, load_id)
+            if boot:
+                rev += boot
+                boot_ok = True
+            detail["bootcamp"] = {"tabs": tabs, "rows": len(boot), "revenue": round(sum(r["fee_paid"] for r in boot))}
+        except Exception as exc:  # noqa: BLE001 - optional source; the main refresh must still finish
+            detail["bootcamp_error"] = f"{type(exc).__name__}: {exc}"[:300]
+            print("::warning::Bootcamp joining sheet not read: " + detail["bootcamp_error"].replace("\n", " "))
+
         calls_raw = fetch_daily(bq, date.today() - timedelta(days=args.call_days))
         calls = calls_rows(calls_raw, name_to_email, all_names, unmapped)
 
@@ -224,7 +282,13 @@ def main(argv: list[str] | None = None) -> int:
         store.upsert("roster", [{**r, "updated_at": datetime.now(timezone.utc).isoformat()} for r in roster], "email")
         store.delete("roster", f"updated_at=lt.{started}")
         store.upsert("revenue_txn", rev, "id")
-        store.delete("revenue_txn", f"load_id=neq.{load_id}" if full else f"sheet=eq.{C.COMBINED_TAB}&load_id=neq.{load_id}")
+        if full:
+            stale = f"load_id=neq.{load_id}" + ("" if boot_ok else f"&sheet=neq.{quote(C.BOOTCAMP_SHEET)}")
+        else:
+            boot_q = quote(f'"{C.BOOTCAMP_SHEET}"')  # in.() list item with a space must be quoted
+            sheets_reloaded = f"{C.COMBINED_TAB},{boot_q}" if boot_ok else C.COMBINED_TAB
+            stale = f"sheet=in.({sheets_reloaded})&load_id=neq.{load_id}"
+        store.delete("revenue_txn", stale)
         # the dashboard reads this daily summary; quick runs rebuild only the current FY (the only part they changed)
         detail["summary_rows"] = store.rpc("rebuild_rev_daily_from", {"p_from": None if full else C.CURRENT_FY_START.isoformat()})
         store.upsert("calls_daily", calls, "call_date,email,dialler")
@@ -243,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
             m = by_month[r["txn_date"][:7]]
             m[0] += r["fee_paid"]
             m[1] += r["is_new_enrolment"]
+        detail["rev_type_current_fy"] = {t: round(sum(r["fee_paid"] for r in rev if r["rev_type"] == t and r["txn_date"] >= C.CURRENT_FY_START.isoformat()))
+                                         for t in ("calling", "collection", "other")}
         detail.update({
             "revenue_rows": len(rev), "call_rows": len(calls), "unmapped": len(unmapped),
             "fy": {fy: round(sum(r["fee_paid"] for r in rev if fy_label(date.fromisoformat(r["txn_date"])) == fy))

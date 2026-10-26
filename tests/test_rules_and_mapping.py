@@ -1,8 +1,8 @@
 from collections import defaultdict
 from datetime import date
 
-from etl.refresh import build_roster, calls_rows, revenue_rows
-from etl.rules import fy_label, is_new_enrolment, norm_name, parse_amount, parse_date
+from etl.refresh import bootcamp_rows, bootcamp_tabs, build_roster, calls_rows, revenue_rows
+from etl.rules import fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
 from etl.sheets import col_letter, find_columns
 
 SCOPE = ("Team Uzair", "Team Darshan", "Team Deepanshi")
@@ -13,7 +13,8 @@ def test_rules():
     assert parse_date("") is None and parse_date("n/a") is None
     assert parse_amount("58,140") == 58140 and parse_amount("₹ 2,000.50") == 2000.5 and parse_amount("") == 0
     assert is_new_enrolment(" New enrollment ", 2000) and not is_new_enrolment("Bootcamp collections - balance payments", 50000)
-    assert not is_new_enrolment("New enrollment", 1500) and not is_new_enrolment("New enrollment", 999)  # must be above ₹1,500
+    assert is_new_enrolment("New enrollment", 801) and is_new_enrolment("New enrollment", 1500)  # above ₹800
+    assert not is_new_enrolment("New enrollment", 800) and not is_new_enrolment("New enrollment", 500)
     assert norm_name("Amit  Ray.") == "amit ray"
     assert fy_label(date(2026, 3, 31)) == "FY2025-26" and fy_label(date(2026, 4, 1)) == "FY2026-27"
 
@@ -56,7 +57,9 @@ def test_revenue_attribution_rules():
         {"_row": 5, "date": "07/10/2026", "caller": "Old Person", "fee_paid": "7000", "enrollment": "New enrollment",
          "team": "Elite", "vertical": "Team Uzair"},              # resigned: sheet's own team
         {"_row": 6, "date": "07/10/2026", "caller": "", "fee_paid": "300", "enrollment": ""},
-        {"_row": 10, "date": "09/10/2026", "caller": "Asha Rao", "fee_paid": "1,500", "enrollment": "New enrollment"},
+        {"_row": 10, "date": "09/10/2026", "caller": "Asha Rao", "fee_paid": "800", "enrollment": "New enrollment"},
+        {"_row": 11, "date": "09/10/2026", "caller": "Bootcamp - Direct", "fee_paid": "2000", "enrollment": "New enrollment",
+         "team": "Bootcamp - Direct", "vertical": "Direct"},
         {"_row": 7, "date": "01/03/2026", "caller": "Asha Rao", "fee_paid": "1", "enrollment": "New enrollment"},
         {"_row": 8, "date": "", "caller": "Asha Rao", "fee_paid": "1", "enrollment": "New enrollment"},
         {"_row": 9, "date": "08/10/2026", "caller": "Asha", "fee_paid": "5000", "enrollment": "New enrollment"},
@@ -69,10 +72,33 @@ def test_revenue_attribution_rules():
         ("Direct", "direct", "Bootcamp - Direct", "Direct", 999, False),
         ("Old Person", "resigned", "Elite", "Team Uzair", 7000, True),
         ("Lead details not available", "no caller", "Not assigned", "Not assigned", 300, False),
-        ("Asha Rao", "current", "Elite", "Team Uzair", 1500, False),   # not above ₹1,500: revenue only
+        ("Asha Rao", "current", "Elite", "Team Uzair", 800, False),   # not above ₹800: revenue only
+        ("Bootcamp - Direct", "direct", "Bootcamp - Direct", "Direct", 2000, True),
         ("Asha", "resigned", "Resigned – team unknown", "Resigned – team unknown", 5000, True),  # exact names only
     ]
     assert ("Old Person", "revenue") in unmapped and ("Direct", "revenue") not in unmapped
+    assert [r["rev_type"] for r in rows[:3]] == ["calling", "calling", "other"]
+
+
+def test_revenue_type_iit_direct():
+    assert revenue_type("New enrollment") == revenue_type("New enrollment- Balance Payment") == "calling"
+    assert revenue_type("Bootcamp Collection-Balance Payment") == revenue_type("Community Collections - balance payments") == "collection"
+    assert revenue_type("Other revenue") == revenue_type("") == revenue_type("Bootcamp caller - balance payments") == "other"
+    assert is_iit("iHub, IIT Roorkee & LawSikho jointly present: X") and is_iit("ICD+IIT") and is_iit("i-hub course")
+    assert not is_iit("Fiitness") and not is_iit("Contract Drafting") and not is_iit("")
+    assert is_direct("Direct") and is_direct("Bootcamp - Direct-International") and not is_direct("Directorship Course Sales")
+
+
+def test_bootcamp_daily_totals():
+    raw = [{"date": "01/07/2026", "fee_paid": "10", "course": "MAIN Data Privacy", "brand": "Skill Arbitrage"},
+           {"date": "01/07/2026", "fee_paid": "10.00", "course": "MAIN Data Privacy", "brand": "Skill Arbitrage"},
+           {"date": "02/07/2026", "fee_paid": "99", "course": "MAIN iHub AI", "brand": "LawSikho"},
+           {"date": "30/06/2026", "fee_paid": "10", "course": "MAIN Data Privacy", "brand": "Skill Arbitrage"}]
+    rows = bootcamp_rows(raw, lambda d: d >= date(2026, 7, 1), "L1")
+    assert [(r["txn_date"], r["fee_paid"], r["n_payments"], r["is_iit"]) for r in rows] == [
+        ("2026-07-01", 20.0, 2, False), ("2026-07-02", 99.0, 1, True)]
+    assert all(r["caller_status"] == "direct" and not r["is_new_enrolment"] and r["rev_type"] == "other" for r in rows)
+    assert bootcamp_tabs(["Total", "June 2026", "July 2026", "October 2026", "Sample"], date(2026, 7, 1)) == ["July 2026", "October 2026"]
 
 
 def test_calls_mapping_adds_spellings_and_skips_others():

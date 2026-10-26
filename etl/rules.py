@@ -5,7 +5,7 @@ import re
 from datetime import date, datetime
 
 NEW_ENROLMENT = "new enrollment"  # Enrollment column value that counts as a new enrolment
-MIN_ENROLMENT_FEE = 1500          # ...and only when Fee paid is above this (Amit, 25 Oct 2026)
+MIN_ENROLMENT_FEE = 800           # ...and only when Fee paid is above this (Amit, 26 Oct 2026; was 1,500)
 
 _DATE_FORMATS = ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d-%m-%Y", "%d-%b-%Y", "%d %b %Y", "%m/%d/%Y %H:%M:%S")
 
@@ -50,8 +50,41 @@ def parse_amount(value: str | float | int | None) -> float:
 
 
 def is_new_enrolment(enrollment: str | None, fee_paid: float | None = None) -> bool:
-    """Rule: Enrollment == 'New enrollment' AND Fee paid above ₹1,500. Balance payments add revenue only."""
+    """Rule: Enrollment == 'New enrollment' AND Fee paid above ₹800. Balance payments add revenue only."""
     return norm_header(enrollment) == NEW_ENROLMENT and fee_paid is not None and fee_paid > MIN_ENROLMENT_FEE
+
+
+CALLING_TYPES = {"new enrollment", "new enrollment - balance payment"}
+COLLECTION_TYPES = {"bootcamp collections - balance payments", "community collections - balance payments"}
+_IIT = re.compile(r"(?<![a-z])iit|i[\s-]?hub", re.I)
+
+
+def _norm_type(enrollment: str | None) -> str:
+    """'New enrollment- Balance Payment' -> 'new enrollment - balance payment'; singular/plural ignored."""
+    s = re.sub(r"\s*-\s*", " - ", norm_header(enrollment))
+    return re.sub(r"\bcollection\b", "collections", re.sub(r"\bpayment\b", "payments", s)).replace(
+        "new enrollment - balance payments", "new enrollment - balance payment")
+
+
+def revenue_type(enrollment: str | None) -> str:
+    """calling = New enrollment + New enrollment - balance payment; collection = Bootcamp / Community collections
+    balance payments; other = everything else (Other revenue, blank, older labels)."""
+    t = _norm_type(enrollment)
+    if t in CALLING_TYPES:
+        return "calling"
+    if t in COLLECTION_TYPES:
+        return "collection"
+    return "other"
+
+
+def is_iit(course: str | None) -> bool:
+    """IIT payment: course name contains 'IIT' or 'iHub' (any case; 'i-hub', 'i hub' too)."""
+    return bool(_IIT.search(course or ""))
+
+
+def is_direct(caller: str | None) -> bool:
+    """Direct payments: 'Direct', 'Bootcamp - Direct', 'Bootcamp - Direct-International', ... (word 'direct')."""
+    return re.search(r"(?<![a-z])direct(?![a-z])", norm_name(caller)) is not None
 
 
 def fy_label(d: date) -> str:
