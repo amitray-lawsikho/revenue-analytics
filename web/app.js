@@ -229,8 +229,7 @@ async function renderOverall(seq) {
   const lastDay = daysIn(+today.slice(0, 4), curMonth);
   const sameLabel = `1 Apr – ${D(today).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" })}`;
   const fyPrevText = `${nice(lastYear(fs))} – ${nice(lastYear(today))}`;
-  const typeCard = (label, fc, fp, mc, mp, hint) => kpi(`${label} · ${fyName(curFy)}`, money(fc), fc, fp, fyPrevText, `${nice(fs)} – ${nice(today)}`,
-    `${monthName}: <b>${rupees(mc)}</b> ${chHtml(change(mc, mp))} vs same dates last year`, hint);
+  const typeCard = (label, fc, fp, mc, mp, hint) => kpi(`${label} · ${fyName(curFy)}`, money(fc), fc, fp, fyPrevText, `${nice(fs)} – ${nice(today)}`, "", hint);
   const fyType = new Map();
   for (const x of fyStatus) { const y = +String(x.period).slice(0, 4), o = fyType.get(y) || { y, calling: 0, collection: 0, other: 0, direct: 0, total: 0 };
     o.calling += +x.calling_rev; o.collection += +x.collection_rev; o.other += +x.other_rev; o.total += +x.revenue;
@@ -593,6 +592,11 @@ function fillFy() {
   const cur = +fyStart(istToday()).slice(0, 4);
   for (let y = cur; y >= 2023; y--) $("fy").insertAdjacentHTML("beforeend", `<option value="${y}">FY ${y}-${String(y + 1).slice(2)}</option>`);
 }
+function clearFilters() {
+  Object.values(S.sel).forEach((set) => set.clear());
+  $("f-status").value = ""; $("f-rtype").value = "all"; $("drawer").hidden = true;
+  buildOptions(); setPreset("month");
+}
 function markPreset(p) { document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === p)); }
 function setPreset(p) { const [f, t, g] = preset(p); $("from").value = f; $("to").value = t; $("grain").value = g; $("fy").value = ""; markPreset(p); render(); }
 function setFy(y) { const t = istToday(), end = `${+y + 1}-03-31`; $("from").value = `${y}-04-01`; $("to").value = end < t ? end : t; $("grain").value = "month"; markPreset(null); render(); }
@@ -681,6 +685,7 @@ $("grain").addEventListener("change", render);
 $("f-status").addEventListener("change", () => { buildOptions(); render(); });
 $("f-rtype").addEventListener("change", () => { $("drawer").hidden = true; render(); });
 $("update").addEventListener("click", update);
+$("clear-filters").addEventListener("click", clearFilters);
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
 $("menu").addEventListener("click", () => {
   if (matchMedia("(max-width: 820px)").matches) { $("side").classList.toggle("open"); return; }
