@@ -16,7 +16,7 @@ Change these only with Amit's explicit OK, and change `etl/rules.py` / `etl/refr
 | Resigned | Any other caller name (not in Teamlist): under the sheet row's team/vertical; the past FY tabs have no team column, so "Resigned – team unknown" |
 | Source of rows | Dates from 1 Apr 2026: `Combined` sheet (+ bootcamp joining daily totals from 1 Jul 2026) (reloaded every run, so back-dated entries simply appear). Earlier dates: Consolidated FY tabs (reloaded in the 09:00 run). No date is read from both |
 | FY 2023-24 caller | That tab has two caller columns; "Caller name for Sales" is used |
-| Comparison | The same dates one year earlier (e.g. 1 Apr–25 Oct 2026 vs 1 Apr–25 Oct 2025) |
+| Comparison | Set by the date button (Amit, 26 Oct 2026). Today → yesterday; Yesterday → the day before; This week → the same days of last week; Last week → the week before; This month → the same days of last month (e.g. 1–26 Oct vs 1–26 Sep); Last month → the month before; This FY → the same dates of last FY; Last FY → the FY before; All years → no comparison. A chosen financial year or custom From/To dates → the same dates one year earlier. The page always says which dates |
 | Part / Month / Year | Part of month = days 1–10, 11–20, 21–end; year = Indian financial year (Apr–Mar). All dates IST |
 | Refresh | 09:00 (full), 13:00, 17:00, 20:00, 23:00 IST via Supabase pg_cron, plus the dashboard's Update button |
 
