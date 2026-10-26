@@ -133,22 +133,6 @@ def bootcamp_rows(raw: list[dict], keep, load_id: str) -> list[dict]:
     } for k, v in sorted(agg.items())]
 
 
-def bootcamp_tabs(titles: list[str], start: date) -> list[str]:
-    """Monthly tabs ("July 2026", "Aug 2026", ...) from `start` onwards."""
-    out = []
-    for t in titles:
-        try:
-            d = datetime.strptime(" ".join(t.split()), "%B %Y").date()
-        except ValueError:
-            try:
-                d = datetime.strptime(" ".join(t.split()), "%b %Y").date()
-            except ValueError:
-                continue
-        if d >= start.replace(day=1):
-            out.append(t)
-    return out
-
-
 def calls_rows(raw: list[dict], name_to_email: dict[str, str], all_names: set[str], unmapped: dict) -> list[dict]:
     """Map call owners to counsellors in scope and add up per (date, email, dialler)."""
     agg: dict[tuple, dict] = {}
@@ -261,16 +245,13 @@ def main(argv: list[str] | None = None) -> int:
         # Bootcamp joining fees, daily totals only. If the sheet can't be read, keep the totals already stored.
         boot_ok = False
         try:
-            meta = sheets.spreadsheets().get(spreadsheetId=C.BOOTCAMP_SHEET_ID, fields="sheets.properties.title").execute()
-            tabs = bootcamp_tabs([x["properties"]["title"] for x in meta.get("sheets", [])], C.BOOTCAMP_START)
-            boot = []
-            for tab in tabs:
-                raw = read_tab(sheets, C.BOOTCAMP_SHEET_ID, tab, C.REVENUE_COLUMNS, ("date", "fee_paid"))
-                boot += bootcamp_rows(raw, lambda d: d >= C.BOOTCAMP_START, load_id)
+            raw = read_tab(sheets, C.BOOTCAMP_SHEET_ID, C.BOOTCAMP_TAB, C.REVENUE_COLUMNS, ("date", "fee_paid"))
+            boot = bootcamp_rows(raw, lambda d: d >= C.BOOTCAMP_START, load_id)
             if boot:
                 rev += boot
                 boot_ok = True
-            detail["bootcamp"] = {"tabs": tabs, "rows": len(boot), "revenue": round(sum(r["fee_paid"] for r in boot))}
+            detail["bootcamp"] = {"payments": sum(r["n_payments"] for r in boot), "day_course_rows": len(boot),
+                                  "revenue": round(sum(r["fee_paid"] for r in boot))}
         except Exception as exc:  # noqa: BLE001 - optional source; the main refresh must still finish
             detail["bootcamp_error"] = f"{type(exc).__name__}: {exc}"[:300]
             print("::warning::Bootcamp joining sheet not read: " + detail["bootcamp_error"].replace("\n", " "))

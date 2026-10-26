@@ -1,7 +1,7 @@
 from collections import defaultdict
 from datetime import date
 
-from etl.refresh import bootcamp_rows, bootcamp_tabs, build_roster, calls_rows, revenue_rows
+from etl.refresh import bootcamp_rows, build_roster, calls_rows, revenue_rows
 from etl.rules import fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
 from etl.sheets import col_letter, find_columns
 
@@ -98,7 +98,6 @@ def test_bootcamp_daily_totals():
     assert [(r["txn_date"], r["fee_paid"], r["n_payments"], r["is_iit"]) for r in rows] == [
         ("2026-07-01", 20.0, 2, False), ("2026-07-02", 99.0, 1, True)]
     assert all(r["caller_status"] == "direct" and not r["is_new_enrolment"] and r["rev_type"] == "other" for r in rows)
-    assert bootcamp_tabs(["Total", "June 2026", "July 2026", "October 2026", "Sample"], date(2026, 7, 1)) == ["July 2026", "October 2026"]
 
 
 def test_calls_mapping_adds_spellings_and_skips_others():
