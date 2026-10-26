@@ -1,4 +1,4 @@
-/* Sales Analytics Dashboard — Revenue Metrics. Data: Supabase RPC rev_aggm_json / rev_dims_json / rev_coursesm (RLS on). */
+/* Revenue Analytics Dashboard — Revenue Metrics. Data: Supabase RPC rev_aggm_json / rev_dims_json / rev_coursesm (RLS on). */
 const sb = supabase.createClient(CP_CONFIG.supabaseUrl, CP_CONFIG.supabaseKey);
 const $ = (id) => document.getElementById(id);
 const PAGES = {
@@ -603,7 +603,7 @@ function setFy(y) { const t = istToday(), end = `${+y + 1}-03-31`; $("from").val
 function setPage(p) {
   if (!PAGES[p]) p = "overall";
   S.page = p; S.sort = { k: "revenue", dir: -1 };
-  $("page-title").textContent = PAGES[p].title; document.title = `${PAGES[p].title} · Sales Analytics Dashboard`;
+  $("page-title").textContent = PAGES[p].title; document.title = `${PAGES[p].title} · Revenue Analytics Dashboard`;
   document.querySelectorAll(".side nav a").forEach((a) => a.classList.toggle("on", a.dataset.page === p));
   $("side").classList.remove("open"); $("drawer").hidden = true;
   showFilters(); render();

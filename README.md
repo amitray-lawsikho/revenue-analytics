@@ -1,4 +1,4 @@
-# Sales Analytics Dashboard
+# Revenue Analytics Dashboard
 
 Dashboard of revenue, new enrolments and calling for Team Uzair, Team Darshan and Team Deepanshi:
 by counsellor, team and vertical; by day, week, month and financial year.

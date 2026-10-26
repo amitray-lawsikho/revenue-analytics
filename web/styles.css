@@ -1,4 +1,4 @@
-/* Sales Analytics Dashboard — black & gold (dark), ivory & gold (light). */
+/* Revenue Analytics Dashboard — black & gold (dark), ivory & gold (light). */
 :root, :root[data-theme="dark"] {
   --bg: #0a0a0b; --side: #0e0e0f; --panel: #131314; --panel-2: #19191b; --raise: #1e1e20;
   --ink: #ece6d9; --muted: #9a9387; --faint: #6d675e;
@@ -211,3 +211,5 @@ tr.total td { font-weight: 700; border-top: 1px solid var(--line-2); color: var(
 .page-tabs { margin-bottom: 14px; }
 .filters-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .filters-top #clear-filters { margin-left: auto; }
+.monogram { font: 700 20px Inter, system-ui, sans-serif; letter-spacing: 0; line-height: 1; }
+.monogram.lg { font-size: 32px; }
