@@ -192,3 +192,11 @@ tr.total td { font-weight: 700; border-top: 1px solid var(--line-2); color: var(
   h1 { font-size: 26px; }
   .chart-box { height: 270px; }
 }
+
+/* loading indicator */
+.busy { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 50; display: inline-flex; align-items: center; gap: 10px;
+  background: var(--raise); color: var(--gold-2); border: 1px solid var(--line-2); border-radius: 999px; padding: 8px 16px;
+  font: 600 13px Inter, sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--gold); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+#content.loading { opacity: .45; pointer-events: none; transition: opacity .15s; }

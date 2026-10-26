@@ -58,6 +58,7 @@ function preset(p) {
     case "today": return [t, t, "day"];
     case "yesterday": { const y = addDays(t, -1); return [y, y, "day"]; }
     case "week": return [addDays(t, -((D(t).getUTCDay() + 6) % 7)), t, "day"];
+    case "lastweek": { const mon = addDays(t, -((D(t).getUTCDay() + 6) % 7) - 7); return [mon, addDays(mon, 6), "day"]; }
     case "month": return [ms, t, "part"];
     case "lastmonth": { const e = addDays(ms, -1); return [e.slice(0, 8) + "01", e, "part"]; }
     case "all": return ["2023-04-01", t, "fy"];
@@ -66,7 +67,12 @@ function preset(p) {
 
 /* ---------- data (one request per query) ---------- */
 async function rpcJson(fn, args) { const { data, error } = await sb.rpc(fn, args); if (error) throw error; return data || []; }
-const agg = (args) => rpcJson("rev_aggm_json", { p_verticals: null, p_teams: null, p_status: null, p_callers: null, ...args });
+const CACHE = new Map();   // same filters again = instant (cleared when new data arrives)
+function agg(args) {
+  const a = { p_verticals: null, p_teams: null, p_status: null, p_callers: null, ...args }, key = JSON.stringify(a);
+  if (!CACHE.has(key)) CACHE.set(key, rpcJson("rev_aggm_json", a).catch((e) => { CACHE.delete(key); throw e; }));
+  return CACHE.get(key);
+}
 function range() { const from = $("from").value, to = $("to").value; return { from, to, pf: lastYear(from), pt: lastYear(to), grain: $("grain").value }; }
 const arr = (set) => (set.size ? [...set] : null);
 function filters(level) {
@@ -153,14 +159,15 @@ function setSub() {
   const r = range();
   $("page-sub").innerHTML = `${nice(r.from)} – ${nice(r.to)} &nbsp;·&nbsp; compared with <b>${nice(r.pf)} – ${nice(r.pt)}</b> (same dates last year)`;
 }
+function busy(on) { $("busy").hidden = !on; $("content").classList.toggle("loading", on); }
 async function render() {
   const seq = ++S.seq;
-  $("content").classList.add("loading");
+  busy(true);
   try {
     if (S.page === "overall") await renderOverall(seq);
     else { const r = range(); if (!r.from || !r.to || r.from > r.to) return; setSub(); await renderLevel(r, seq, PAGES[S.page]); }
   } catch (e) { if (seq === S.seq) $("content").innerHTML = `<div class="card empty">Could not load data: ${esc(e.message || e)}</div>`; }
-  $("content").classList.remove("loading");
+  if (seq === S.seq) busy(false);
 }
 
 /* ---------- Overall ---------- */
@@ -500,7 +507,7 @@ async function update() {
   const poll = async () => {
     const run = await lastRun();
     if (run && run.run_at > before) { showFresh(run); $("update-msg").textContent = run.status === "ok" ? "Updated." : "Update failed; see the note above.";
-      btn.disabled = false; await loadDims(); render(); return; }
+      btn.disabled = false; CACHE.clear(); await loadDims(); render(); return; }
     if (Date.now() - t0 > 15 * 60e3) { $("update-msg").textContent = "Still running; check back in a few minutes."; btn.disabled = false; return; }
     setTimeout(poll, 20000);
   };
@@ -531,6 +538,7 @@ async function start() {
   const [f, t, g] = preset("month"); $("from").value = f; $("to").value = t; $("grain").value = g; markPreset("month");
   setPage(location.hash.slice(1));
   lastRun().then(showFresh); loadDims();   // in the background: never delay the first page
+  setTimeout(() => agg({ p_from: "2023-04-01", p_to: istToday(), p_grain: "day", p_group: "none" }).catch(() => {}), 1500);
 }
 $("auth-form").addEventListener("submit", async (e) => {
   e.preventDefault(); $("auth-msg").textContent = "Signing in…";
