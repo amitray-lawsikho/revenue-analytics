@@ -7,6 +7,7 @@ by day, week, month and financial year, compared with the same dates last year. 
 - `etl/refresh.py`: Google Sheets (Teamlist, Combined, Consolidated FY tabs, Bootcamp Joining monthly tabs as daily totals) + BigQuery calling tables
   (`studious-apex-488820-c3.crm_dashboard`: acefone_calls, mcube_calls, ozonetel_calls, manual_calls) -> Supabase
   project "Counsellor Performance" (`oifzauaspvfkmzyutwtj`).
+- Repo `amitray-lawsikho/revenue-analytics` (renamed from counsellor-performance on 26 Oct 2026; `_dispatch_refresh` uses the new name).
 - `.github/workflows/refresh.yml`: workflow_dispatch only; Supabase pg_cron / the Update button start it.
   No Claude and no LLM call in daily runs.
 - `web/`: static dashboard "Revenue Analytics Dashboard" (no build step) at https://counsellor-performance.amitray.workers.dev (Cloudflare, deploys on push to main); Supabase email login; only emails in `allowed_users` can read.
