@@ -65,6 +65,8 @@ function preset(p) {
     case "lastweek": { const mon = addDays(t, -((D(t).getUTCDay() + 6) % 7) - 7); return [mon, addDays(mon, 6), "day"]; }
     case "month": return [ms, t, "part"];
     case "lastmonth": { const e = addDays(ms, -1); return [e.slice(0, 8) + "01", e, "part"]; }
+    case "year": return [fyStart(t), t, "month"];
+    case "lastyear": { const y = +fyStart(t).slice(0, 4) - 1; return [`${y}-04-01`, `${y + 1}-03-31`, "month"]; }
     case "all": return ["2023-04-01", t, "fy"];
   }
 }
