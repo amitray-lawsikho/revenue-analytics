@@ -17,6 +17,6 @@ by day, week, month and financial year, compared with the same dates last year. 
 
 ## Rules
 - Never read or store customer name from revenue sheets; phone and email are read only to make keyed one-way codes (`revenue_txn.cust_key` for IIT rows; `ph_key`/`em_key` for New enrollment ≥ ₹999, used by the Leads Console Realtime Tracker through `lc_rev_match`; Amit, 30 Oct 2026) and are never stored, logged or printed (the column list in `etl/config.py`; Amit, 30 Oct 2026).
-- Keys only in env / GitHub secrets: BQ_CREDENTIALS, SUPABASE_URL, SUPABASE_SERVICE_KEY. Never print them.
+- Keys only in env / GitHub secrets: BQ_CREDENTIALS, SUPABASE_URL, SUPABASE_SERVICE_KEY. Never print them. The customer-code key lives only in Supabase (`_rev_secret`, read via `_rev_hash_key`, service role).
 - Token economy: inspect headers + a few rows, aggregate in SQL; never dump whole sheets or tables into chat.
 - Run `python -m pytest -q` before every push; add a test with each rule change.

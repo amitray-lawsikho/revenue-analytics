@@ -81,12 +81,13 @@ def attribute(raw_name: str, sheet_team: str, sheet_vertical: str, name_to_email
             "team": st or UNKNOWN_TEAM, "vertical": sv or UNKNOWN_TEAM}
 
 
-def hash_secret() -> bytes:
-    """Key for the IIT customer code: REV_HASH_KEY if set, else derived from the Supabase service key (both secrets)."""
-    k = os.environ.get("REV_HASH_KEY", "").strip() or os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+def hash_secret(store) -> bytes:
+    """Key for the keyed one-way customer codes. It lives only in the database (_rev_secret, service role), so the
+    Leads Console lookup (lc_rev_match) codes identifiers the same way without the key ever leaving Supabase."""
+    k = store.rpc("_rev_hash_key")
     if not k:
-        raise RuntimeError("REV_HASH_KEY / SUPABASE_SERVICE_KEY missing: needed for the IIT customer code")
-    return hashlib.sha256(("iit-customer|" + k).encode()).digest()
+        raise RuntimeError("_rev_hash_key returned nothing: the customer-code key is missing in Supabase")
+    return bytes.fromhex(k)
 
 
 def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str], roster_by_email: dict[str, dict],
@@ -247,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         unmapped: dict = defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None})
         need = ("date", "fee_paid", "caller", "enrollment")
         raw = read_tab(sheets, C.COMBINED_SHEET_ID, C.COMBINED_TAB, C.REVENUE_COLUMNS, need)
-        secret = hash_secret()
+        secret = hash_secret(store)
         rev = revenue_rows(raw, C.COMBINED_TAB, lambda d: d >= C.CURRENT_FY_START, name_to_email, roster_by_email,
                            load_id, unmapped, secret)
         detail["combined_rows_without_date"] = sum(1 for r in raw if not parse_date(r.get("date")))

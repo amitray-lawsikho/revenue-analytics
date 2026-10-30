@@ -162,3 +162,11 @@ def test_tracker_codes():
     rows = revenue_rows(raw, "Combined", lambda d: True, {}, {}, "L1", defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None}), k)
     assert rows[0]["ph_key"] == customer_key("9876543210", None, k) and rows[0]["em_key"] == customer_key(None, "a@b.com", k)
     assert rows[1]["ph_key"] is None and rows[1]["em_key"] is None
+
+
+def test_customer_key_matches_postgres():
+    """lc_rev_match codes in SQL: substr(encode(hmac(convert_to(id,'UTF8'), key, 'sha256'),'hex'),1,32).
+    Same key and id must give the same code as rules.customer_key (value checked against Supabase, 30 Oct 2026)."""
+    from etl.rules import customer_key
+    key = bytes.fromhex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+    assert customer_key("+91 98765 43210", None, key) == "87eb58fdcb7d86b835d2db7e417b8a51"
