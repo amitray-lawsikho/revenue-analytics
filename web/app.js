@@ -81,9 +81,12 @@ function agg(args) {
 }
 /* Revenue type / IIT view: the summary rows carry every split, so switching costs no extra query. */
 const mode = () => (S.page === "iit" ? "iit" : ($("f-rtype").value || "all"));
+/* IIT pages count "sold" = unique customers per course (any payment type), not new enrolments (Amit, 30 Oct 2026) */
+const enrShort = () => (mode() === "iit" ? "sold" : "enr");
+const enrLong = () => (mode() === "iit" ? "IIT sold" : "new enrolments");
 function vw(rows, m) {
   if (m === "all") return rows;
-  return rows.map((r) => m === "iit" ? { ...r, revenue: +r.iit_rev, enrolments: +r.iit_enrol, payments: +r.iit_pay }
+  return rows.map((r) => m === "iit" ? { ...r, revenue: +r.iit_rev, enrolments: +r.iit_sold, payments: +r.iit_pay }
     : { ...r, revenue: +r[m + "_rev"], enrolments: m === "calling" ? +r.enrolments : 0 }).filter((r) => r.revenue || r.enrolments);
 }
 const aggV = (args, m = mode()) => agg({ ...args, p_iit: m === "iit" }).then((rows) => vw(rows, m));
@@ -121,7 +124,7 @@ function filters(level) {
   if (level === "caller") { f.p_status = $("f-status").value || null; f.p_callers = arr(S.sel.caller); }
   return f;
 }
-const SUMS = ["revenue", "enrolments", "payments", "calling_rev", "collection_rev", "other_rev", "iit_rev", "iit_enrol", "iit_bal", "iit_pay"];
+const SUMS = ["revenue", "enrolments", "payments", "calling_rev", "collection_rev", "other_rev", "iit_rev", "iit_enrol", "iit_bal", "iit_pay", "iit_sold"];
 const tot = (rows) => rows.reduce((a, r) => { SUMS.forEach((k) => (a[k] += Number(r[k] || 0))); return a; },
   Object.fromEntries(SUMS.map((k) => [k, 0])));
 
@@ -168,8 +171,8 @@ function revenueBarsConfig(labels, rev, enr) {
     type: "bar",
     data: { labels, datasets: [{ label: "Revenue", data: rev, backgroundColor: css("--gold"), borderRadius: 4, maxBarThickness: 46 }] },
     options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 22 } },
-      plugins: { legend: { display: false }, barLabels: { labels: enr.map((e) => `${num(e)} enr`) },
-        tooltip: { callbacks: { label: (c) => ` Revenue ${both(c.raw)}`, afterLabel: (c) => ` New enrolments ${num(enr[c.dataIndex])}` } } },
+      plugins: { legend: { display: false }, barLabels: { labels: enr.map((e) => `${num(e)} ${enrShort()}`) },
+        tooltip: { callbacks: { label: (c) => ` Revenue ${both(c.raw)}`, afterLabel: (c) => ` ${enrLong()[0].toUpperCase() + enrLong().slice(1)} ${num(enr[c.dataIndex])}` } } },
       scales: { y: yRupees(), x: { grid: { display: false } } } },
   };
 }
@@ -370,14 +373,14 @@ async function renderLevel(r, seq, page) {
   if (lvl !== "vertical") cols.push({ h: "Team", k: "team", l: 1 });
   cols.push({ h: "Vertical", k: "vertical", l: 1 },
     { h: isIit ? "IIT revenue" : m === "all" ? "Revenue" : MODES[m], k: "revenue", f: (x) => money(x.revenue) },
-    ...(hasEnr ? [{ h: isIit ? "IIT new enrolments" : "New enrolments", k: "enrolments", f: (x) => num(x.enrolments) }] : []));
+    ...(hasEnr ? [{ h: isIit ? "IIT sold" : "New enrolments", k: "enrolments", f: (x) => num(x.enrolments) }] : []));
   if (isIit) cols.push({ h: "IIT balance payments", k: "iit_bal", f: (x) => num(x.iit_bal) }, { h: "IIT payments", k: "payments", f: (x) => num(x.payments) });
   if (m === "all") cols.push({ h: "Calling", k: "calling_rev", f: (x) => money(x.calling_rev) }, { h: "Collection", k: "collection_rev", f: (x) => money(x.collection_rev) },
     { h: "Other", k: "other_rev", f: (x) => money(x.other_rev) });
   if (!isCaller && m === "all") cols.push({ h: "Payments", k: "payments", f: (x) => num(x.payments) });
   cols.push({ h: "Share", k: "share", f: (x) => pct(x.share) },
     ...(r.cmp ? [{ h: `Revenue ${r.cmpShort}`, k: "ly_revenue", f: (x) => money(x.ly_revenue) },
-      ...(hasEnr ? [{ h: `Enrolments ${r.cmpShort}`, k: "ly_enrolments", f: (x) => num(x.ly_enrolments) }] : []),
+      ...(hasEnr ? [{ h: `${isIit ? "Sold" : "Enrolments"} ${r.cmpShort}`, k: "ly_enrolments", f: (x) => num(x.ly_enrolments) }] : []),
       { h: "Change", k: "change", f: (x) => chHtml(x.change) }] : []));
   const totalRow = { _total: 1, _i: -1, caller: "Total", team: lvl === "team" ? "Total" : "", vertical: lvl === "vertical" ? "Total" : "",
     revenue: c.revenue, enrolments: c.enrolments, payments: c.payments, share: 1, ly_revenue: pTot.revenue, ly_enrolments: pTot.enrolments, change: change(c.revenue, pTot.revenue),
@@ -397,28 +400,28 @@ async function renderLevel(r, seq, page) {
     <section class="card"><div class="card-h"><h3>Caller trends</h3>
       <div class="seg" id="cgrain">${Object.entries(GRAINS).map(([g, t]) => `<button data-g="${g}" class="${S.cgrain === g ? "on" : ""}">${t}</button>`).join("")}</div></div>
       <p class="muted small" style="margin:-4px 0 12px">${S.sel.caller.size ? "The callers chosen in the Caller filter" : "The 8 biggest callers in these dates — choose callers in the Caller filter to compare others"}
-        · each colour is one ${GRAINS[tg].toLowerCase()} · number on each bar = new enrolments${esc(gnote)}</p>
+        · each colour is one ${GRAINS[tg].toLowerCase()} · number on each bar = ${enrLong()}${esc(gnote)}</p>
       <div class="chart-box" style="height:max(460px, 58vh)"><canvas id="ch-ctrend"></canvas></div></section>
-    <section class="card"><div class="card-h"><h3>Top 25 callers by ${GRAINS[tg].toLowerCase()}</h3><span class="muted small">Darker = more revenue · small figure = new enrolments</span></div>
+    <section class="card"><div class="card-h"><h3>Top 25 callers by ${GRAINS[tg].toLowerCase()}</h3><span class="muted small">Darker = more revenue · small figure = ${enrLong()}</span></div>
       <div class="table-wrap heat">${table([{ h: "Caller", k: "caller", l: 1 }, ...periods.map((p) => ({ h: periodLabel(p, tg), f: (x) => {
           const v = cell.get(x.key + "@" + p); if (!v) return "";
-          return `<span title="${full(+v.revenue)}${hasEnr ? ` · ${num(+v.enrolments)} new enrolments` : ""}">${rupees(+v.revenue)}${hasEnr ? `<small>${num(+v.enrolments)} enr</small>` : ""}</span>`; } })),
+          return `<span title="${full(+v.revenue)}${hasEnr ? ` · ${num(+v.enrolments)} ${enrLong()}` : ""}">${rupees(+v.revenue)}${hasEnr ? `<small>${num(+v.enrolments)} ${enrShort()}</small>` : ""}</span>`; } })),
         { h: "Total", f: (x) => money(x.revenue) }], heat)}</div></section>`;
 
-  const enrLabel = isIit ? "IIT new enrolments" : m === "all" || m === "calling" ? "New enrolments" : "";
+  const enrLabel = isIit ? "IIT sold" : m === "all" || m === "calling" ? "New enrolments" : "";
   const iitSplit = isIit ? (() => {   // collection teams (Mayur, Anmol) vs sales teams
     const part = (list, coll) => tot(list.filter((x) => COLLECTION_VERTICAL.test(x.vertical || "") === coll));
     const sc = part(rows, false), sp = part(ly, false), cc = part(rows, true), cp = part(ly, true);
     return `<h4 class="section-h">Sales teams vs collection teams</h4><section class="kpis k4">
       ${kpi("Sales teams · IIT revenue", money(sc.revenue), sc.revenue, sp.revenue, prevText, "All verticals except Team Mayur and Team Anmol",
-        `<b>${num(sc.enrolments)}</b> IIT new enrolments ${chHtml(change(sc.enrolments, sp.enrolments))} · <b>${num(sc.iit_bal)}</b> IIT balance payments`)}
+        `<b>${num(sc.enrolments)}</b> IIT sold ${chHtml(change(sc.enrolments, sp.enrolments))} · <b>${num(sc.iit_bal)}</b> IIT balance payments`)}
       ${kpi("Collection teams · IIT revenue", money(cc.revenue), cc.revenue, cp.revenue, prevText, "Team Mayur and Team Anmol", `<b>${num(cc.payments)}</b> IIT payments`)}
     </section>`; })() : "";
   $("content").innerHTML = `
     ${page.iit ? `<div class="seg page-tabs" id="iit-level">${Object.entries(LEVELS).map(([k2, t]) => `<button data-l="${k2}" class="${S.iitLevel === k2 ? "on" : ""}">${t} wise</button>`).join("")}</div>` : ""}
     <section class="kpis">
       ${kpi(MODES[m], money(c.revenue), c.revenue, pTot.revenue, prevText, curText)}
-      ${enrLabel ? kpi(enrLabel, num(c.enrolments), c.enrolments, pTot.enrolments, prevText, curText, isIit ? "New enrollment above ₹800 with an IIT / iHub course" : "") : ""}
+      ${enrLabel ? kpi(enrLabel, num(c.enrolments), c.enrolments, pTot.enrolments, prevText, curText, isIit ? "Unique customers (phone, else email) per IIT / iHub course, any payment type, counted for each caller who took a payment" : "") : ""}
       ${isIit ? kpi("IIT balance payments", num(c.iit_bal), c.iit_bal, pTot.iit_bal, prevText, curText, "New enrollment - balance payments with an IIT / iHub course (upgrades)") : ""}
       ${m === "all" ? kpi("Calling revenue", money(c.calling_rev), c.calling_rev, pTot.calling_rev, prevText, curText) +
         kpi("Collection revenue", money(c.collection_rev), c.collection_rev, pTot.collection_rev, prevText, curText) : ""}
@@ -426,11 +429,11 @@ async function renderLevel(r, seq, page) {
     </section>
     ${iitSplit}
     <section class="card"><div class="card-h"><h3>${isCaller ? "Top 15 callers" : `Revenue by ${page.label.toLowerCase()}`}</h3>
-      <span class="muted small">Gold = selected dates${r.cmp ? ` · grey = ${esc(r.cmp)}` : ""} · label = new enrolments${r.cmp ? " and change" : ""}</span></div>
+      <span class="muted small">Gold = selected dates${r.cmp ? ` · grey = ${esc(r.cmp)}` : ""} · label = ${enrLong()}${r.cmp ? " and change" : ""}</span></div>
       <div class="chart-box" style="height:${Math.max(260, 70 + top.length * 42)}px"><canvas id="ch-rank"></canvas></div></section>
     ${callerTrends}
     ${isCaller ? "" : `<section class="card"><div class="card-h"><h3>Trend by ${page.label.toLowerCase()}</h3>
-      <span class="muted small">One bar per ${page.label.toLowerCase()}${lvl === "team" ? " (10 biggest + Others)" : ""} · number on each bar = its new enrolments${esc(gnote)}</span></div>
+      <span class="muted small">One bar per ${page.label.toLowerCase()}${lvl === "team" ? " (10 biggest + Others)" : ""} · number on each bar = its ${enrLong()}${esc(gnote)}</span></div>
       <div class="chart-box" style="height:400px"><canvas id="ch-trend"></canvas></div></section>`}
     <section class="card"><div class="card-h"><h3>${isCaller ? "Caller leaderboard" : `${page.label} table`}</h3>
       <span class="muted small">Click a ${page.label.toLowerCase()} for its trend, ${lvl === "vertical" ? "teams and " : lvl === "team" ? "callers and " : ""}courses · click a column to sort · hover an amount for the exact figure</span></div>
@@ -439,7 +442,7 @@ async function renderLevel(r, seq, page) {
       <div class="table-wrap">${courseTable(iitCourses)}</div></section>` : ""}
     ${isCaller ? "" : `<section class="card"><div class="card-h"><h3>${page.label} by period</h3>
       <div class="seg" id="pivot-metric"><button data-m="revenue" class="${metric === "revenue" ? "on" : ""}">Revenue</button>
-      ${hasEnr ? `<button data-m="enrolments" class="${metric === "enrolments" ? "on" : ""}">New enrolments</button>` : ""}</div></div>
+      ${hasEnr ? `<button data-m="enrolments" class="${metric === "enrolments" ? "on" : ""}">${mode() === "iit" ? "IIT sold" : "New enrolments"}</button>` : ""}</div></div>
       <div class="table-wrap">${table([{ h: page.label, k: "n", l: 1 }, ...periods.map((p) => ({ h: periodLabel(p, tg), f: (x) => pf(x[p]) })), { h: "Total", f: (x) => pf(x.t) }], pivRows)}</div></section>`}`;
 
   if (isCaller) document.querySelectorAll(".heat tbody tr").forEach((tr, ri) => {
@@ -457,8 +460,8 @@ async function renderLevel(r, seq, page) {
         ...(r.cmp ? [{ label: r.cmp[0].toUpperCase() + r.cmp.slice(1), data: top.map((x) => x.ly_revenue), backgroundColor: css("--ly"), borderRadius: 3, barPercentage: .9, categoryPercentage: .78 }] : []),
       ] },
     options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, layout: { padding: { right: 120 } },
-      plugins: { legend: { position: "bottom" }, barLabels: { dataset: 0, labels: top.map((x) => `${hasEnr ? num(x.enrolments) + " enr  " : ""}${chTxt(x.change)}`) },
-        tooltip: { callbacks: { label: (cc) => ` ${cc.dataset.label}: ${both(cc.raw)} · ${num(cc.datasetIndex ? top[cc.dataIndex].ly_enrolments : top[cc.dataIndex].enrolments)} enr` } } },
+      plugins: { legend: { position: "bottom" }, barLabels: { dataset: 0, labels: top.map((x) => `${hasEnr ? num(x.enrolments) + " " + enrShort() + "  " : ""}${chTxt(x.change)}`) },
+        tooltip: { callbacks: { label: (cc) => ` ${cc.dataset.label}: ${both(cc.raw)} · ${num(cc.datasetIndex ? top[cc.dataIndex].ly_enrolments : top[cc.dataIndex].enrolments)} ${enrShort()}` } } },
       scales: { x: yRupees(), y: { grid: { display: false }, ticks: { color: css("--ink") } } } },
   });
   if (!isCaller) {
@@ -496,7 +499,7 @@ function courses(args) {
   return CACHE.get(key);
 }
 const courseTable = (list) => table([{ h: "Course", f: (cc) => `<span style="white-space:normal">${esc(cc.course)}</span>`, l: 1 },
-  { h: "Revenue", f: (cc) => money(+cc.revenue) }, { h: "New enr.", f: (cc) => num(+cc.enrolments) }, { h: "Payments", f: (cc) => num(+cc.payments) }], list || []);
+  { h: "Revenue", f: (cc) => money(+cc.revenue) }, { h: mode() === "iit" ? "Sold" : "New enr.", f: (cc) => num(mode() === "iit" ? +cc.sold : +cc.enrolments) }, { h: "Payments", f: (cc) => num(+cc.payments) }], list || []);
 
 /* ---------- drill-down drawer: vertical -> teams -> callers ---------- */
 const KID = { vertical: "team", team: "caller" };
@@ -518,7 +521,7 @@ async function openDetail(x, lvl) {
   $("d-sub").innerHTML = `${where}${nice(r.from)} – ${nice(r.to)}${r.cmp ? `, compared with ${nice(r.pf)} – ${nice(r.pt)} (${esc(r.cmp)})` : ""}${tg !== S.dgrain ? " · shown by month (more than 62 days)" : ""}`;
   const ly = r.cmp || "";
   $("d-kpis").innerHTML = kpi(MODES[m], money(x.revenue), x.revenue, x.ly_revenue, ly) +
-    (m === "all" || m === "calling" || m === "iit" ? kpi(m === "iit" ? "IIT new enrolments" : "New enrolments", num(x.enrolments), x.enrolments, x.ly_enrolments, ly) : "") +
+    (m === "all" || m === "calling" || m === "iit" ? kpi(m === "iit" ? "IIT sold" : "New enrolments", num(x.enrolments), x.enrolments, x.ly_enrolments, ly) : "") +
     (m === "all" ? kpi("Revenue by type", `<span class="num" style="font-size:18px">Calling ${rupees(x.calling_rev)}</span>`, null, null, "", "",
       `Collection <b>${rupees(x.collection_rev)}</b> · Other <b>${rupees(x.other_rev)}</b>`) : "") +
     (m === "iit" ? kpi("IIT balance payments", num(x.iit_bal), null, null, "") : "");
@@ -546,7 +549,7 @@ async function openDetail(x, lvl) {
   if (kid) {
     const kids = joinLy(kc, kl, kid); kids.forEach((k2, i) => (k2._i = i)); S.dkids = kids;
     const cols = [{ h: LEVELS[kid], l: 1, f: (k2) => esc(kid === "team" ? k2.team : k2.caller) + (kid === "caller" ? ` <span class="badge ${k2.status === "no caller" ? "" : esc(k2.status)}">${esc(STATUS[k2.status] || k2.status)}</span>` : "") },
-      { h: "Revenue", f: (k2) => money(k2.revenue) }, { h: "New enr.", f: (k2) => num(k2.enrolments) },
+      { h: "Revenue", f: (k2) => money(k2.revenue) }, { h: m === "iit" ? "Sold" : "New enr.", f: (k2) => num(k2.enrolments) },
       ...(r.cmp ? [{ h: r.cmpShort[0].toUpperCase() + r.cmpShort.slice(1), f: (k2) => money(k2.ly_revenue) }, { h: "Change", f: (k2) => chHtml(k2.change) }] : [])];
     $("d-kids").innerHTML = table(cols, kids, { click: true });
   }

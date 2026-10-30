@@ -121,3 +121,28 @@ def test_service_account_secret_formats():
     assert load_sa_info(full)["client_email"] == "a@b.iam"
     assert load_sa_info(full[1:-1])["client_email"] == "a@b.iam"            # outer braces missing
     assert load_sa_info(base64.b64encode(full.encode()).decode())["private_key"]
+
+
+def test_iit_customer_key():
+    """IIT sold (Amit, 30 Oct 2026): one code per customer, phone first (last 10 digits), email only when no phone;
+    only IIT rows get one; the code never contains the phone or email."""
+    from etl.rules import customer_key
+    k = b"test-key"
+    a = customer_key("+91 98765-43210", "x@y.com", k)
+    assert a == customer_key("919876543210", "other@z.com", k)          # same phone, any email -> same customer
+    assert a != customer_key("9876543211", "x@y.com", k)                 # phone wins over email
+    assert customer_key("", " X@Y.com ", k) == customer_key(None, "x@y.com", k)   # no phone -> email
+    assert customer_key("0000000000", "", k) is None and customer_key("", "n/a", k) is None
+    assert "9876543210" not in a and a != customer_key("9876543210", "", b"other-key")
+    n2e, by_email = {}, {}
+    raw = [{"_row": 2, "date": "05/10/2026", "caller": "X", "fee_paid": "5000", "enrollment": "New enrollment",
+            "course": "AI course with iHub, IIT Roorkee", "cust_phone": "9876543210", "cust_email": ""},
+           {"_row": 3, "date": "06/10/2026", "caller": "Y", "fee_paid": "5000", "enrollment": "New enrollment - balance payment",
+            "course": "AI course with iHub, IIT Roorkee", "cust_phone": "", "cust_email": ""},
+           {"_row": 4, "date": "06/10/2026", "caller": "Y", "fee_paid": "5000", "enrollment": "New enrollment",
+            "course": "Contract drafting", "cust_phone": "9876543210", "cust_email": ""}]
+    rows = revenue_rows(raw, "Combined", lambda d: True, n2e, by_email, "L1", defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None}), k)
+    assert rows[0]["cust_key"] == customer_key("9876543210", "", k)
+    assert rows[1]["cust_key"] == "row:" + rows[1]["id"]                  # IIT row without phone/email: its own customer
+    assert rows[2]["cust_key"] is None                                    # not IIT: no code
+    assert all("cust_phone" not in r and "cust_email" not in r for r in rows)

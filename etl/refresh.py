@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 from etl import config as C
-from etl.rules import fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
+from etl.rules import customer_key, fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly", "https://www.googleapis.com/auth/bigquery"]
@@ -81,8 +81,16 @@ def attribute(raw_name: str, sheet_team: str, sheet_vertical: str, name_to_email
             "team": st or UNKNOWN_TEAM, "vertical": sv or UNKNOWN_TEAM}
 
 
+def hash_secret() -> bytes:
+    """Key for the IIT customer code: REV_HASH_KEY if set, else derived from the Supabase service key (both secrets)."""
+    k = os.environ.get("REV_HASH_KEY", "").strip() or os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+    if not k:
+        raise RuntimeError("REV_HASH_KEY / SUPABASE_SERVICE_KEY missing: needed for the IIT customer code")
+    return hashlib.sha256(("iit-customer|" + k).encode()).digest()
+
+
 def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str], roster_by_email: dict[str, dict],
-                 load_id: str, unmapped: dict) -> list[dict]:
+                 load_id: str, unmapped: dict, secret: bytes | None = None) -> list[dict]:
     """Every payment row whose date `keep(d)` accepts, credited by `attribute`. Rows without a readable date are skipped."""
     out = []
     for r in raw:
@@ -98,13 +106,17 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
             u["fee_paid"] += fee
             u["last_seen"] = max(u["last_seen"] or d, d)
         key = f"{sheet}|{r['_row']}|{d}|{raw_name}|{fee}|{r.get('course', '')}"
+        rid = hashlib.sha1(key.encode()).hexdigest()
+        iit = is_iit(r.get("course"))
+        # IIT sold = unique customers per course: a keyed code from phone/email (IIT rows only; a row with neither is its own customer)
+        ck = (customer_key(r.get("cust_phone"), r.get("cust_email"), secret) or f"row:{rid}") if iit and secret else None
         out.append({
-            "id": hashlib.sha1(key.encode()).hexdigest(),
+            "id": rid, "cust_key": ck,
             "txn_date": d.isoformat(), "caller_name_raw": raw_name, **a,
             "brand": (r.get("brand") or "").strip(), "course": (r.get("course") or "").strip(),
             "source": (r.get("source") or "").strip(), "enrollment_type": (r.get("enrollment") or "").strip(),
             "is_new_enrolment": is_new_enrolment(r.get("enrollment"), fee), "fee_paid": fee,
-            "rev_type": revenue_type(r.get("enrollment")), "is_iit": is_iit(r.get("course")), "n_payments": 1,
+            "rev_type": revenue_type(r.get("enrollment")), "is_iit": iit, "n_payments": 1,
             "sheet": sheet, "load_id": load_id,
         })
     return out
@@ -124,7 +136,7 @@ def bootcamp_rows(raw: list[dict], keep, load_id: str) -> list[dict]:
         a[0] += parse_amount(r.get("fee_paid"))
         a[1] += 1
     return [{
-        "id": hashlib.sha1(f"{C.BOOTCAMP_SHEET}|{'|'.join(k)}".encode()).hexdigest(),
+        "id": hashlib.sha1(f"{C.BOOTCAMP_SHEET}|{'|'.join(k)}".encode()).hexdigest(), "cust_key": None,  # daily totals: no customers
         "txn_date": k[0], "caller_name_raw": "", "email": None, "caller": C.BOOTCAMP_CALLER, "caller_status": "direct",
         "team": C.BOOTCAMP_SHEET, "vertical": C.BOOTCAMP_SHEET, "brand": k[1], "course": k[2], "source": "",
         "enrollment_type": k[3], "is_new_enrolment": False, "fee_paid": round(v[0], 2),
@@ -230,8 +242,9 @@ def main(argv: list[str] | None = None) -> int:
         unmapped: dict = defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None})
         need = ("date", "fee_paid", "caller", "enrollment")
         raw = read_tab(sheets, C.COMBINED_SHEET_ID, C.COMBINED_TAB, C.REVENUE_COLUMNS, need)
+        secret = hash_secret()
         rev = revenue_rows(raw, C.COMBINED_TAB, lambda d: d >= C.CURRENT_FY_START, name_to_email, roster_by_email,
-                           load_id, unmapped)
+                           load_id, unmapped, secret)
         detail["combined_rows_without_date"] = sum(1 for r in raw if not parse_date(r.get("date")))
         detail["combined_rows_before_fy"] = sum(1 for r in raw if (d := parse_date(r.get("date"))) and d < C.CURRENT_FY_START)
         if not rev:
@@ -240,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
             for tab in C.CONSOLIDATED_TABS:
                 raw = read_tab(sheets, C.CONSOLIDATED_SHEET_ID, tab, C.REVENUE_COLUMNS, need)
                 rev += revenue_rows(raw, tab, lambda d: d < C.CURRENT_FY_START, name_to_email, roster_by_email,
-                                    load_id, unmapped)
+                                    load_id, unmapped, secret)
 
         # Bootcamp joining fees, daily totals only. If the sheet can't be read, keep the totals already stored.
         boot_ok = False

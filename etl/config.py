@@ -33,7 +33,8 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip() or "https://oifzauaspv
 BQ_PROJECT = os.environ.get("BQ_PROJECT", "studious-apex-488820-c3")
 BQ_DATASET = os.environ.get("BQ_DATASET", "crm_dashboard")
 
-# Revenue columns we read, found by header text. Customer name, phone and email are never read.
+# Revenue columns we read, found by header text. Customer name is never read. Phone and email are read only to make the
+# IIT customer code (rules.customer_key, IIT rows only); they are never stored, logged or sent anywhere.
 REVENUE_COLUMNS = {
     "brand": ("lawsikho/skill arbitrage", "brand"),
     "date": ("date",),
@@ -44,6 +45,8 @@ REVENUE_COLUMNS = {
     "source": ("source",),
     "team": ("team",),                # Combined only; used for callers no longer in Teamlist
     "vertical": ("vertical",),        # Combined only; used for callers no longer in Teamlist
+    "cust_phone": ("contact no",),    # IIT customer code only, never stored
+    "cust_email": ("email id",),      # IIT customer code only, never stored
 }
 
 ROSTER_COLUMNS = {

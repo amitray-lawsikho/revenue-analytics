@@ -1,6 +1,8 @@
 """Business rules, in one place (docs/definitions.md). Pure functions, no I/O."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
 from datetime import date, datetime
 
@@ -80,6 +82,20 @@ def revenue_type(enrollment: str | None) -> str:
 def is_iit(course: str | None) -> bool:
     """IIT payment: course name contains 'IIT' or 'iHub' (any case; 'i-hub', 'i hub' too)."""
     return bool(_IIT.search(course or ""))
+
+
+def customer_key(phone: str | None, email: str | None, secret: bytes) -> str | None:
+    """IIT sold: one irreversible code per customer (Amit, 30 Oct 2026). Phone (last 10 digits) is the key; email only
+    when the phone is blank. Keyed hash: the phone / email itself is never stored and the code can't be turned back."""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) >= 10 and set(digits[-10:]) != {"0"}:
+        base = "p:" + digits[-10:]
+    else:
+        e = str(email or "").strip().lower()
+        if "@" not in e:
+            return None
+        base = "e:" + e
+    return hmac.new(secret, base.encode(), hashlib.sha256).hexdigest()[:32]
 
 
 def is_direct(caller: str | None) -> bool:

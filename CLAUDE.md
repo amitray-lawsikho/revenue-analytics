@@ -16,7 +16,7 @@ by day, week, month and financial year, compared with the same dates last year. 
   (09:00 full, 17:00, 23:00 IST; 3 a day to save GitHub minutes) using the Vault secret github_token; get_perf/get_courses (calling, unused). Change schema with a migration, keep RLS on.
 
 ## Rules
-- Never read or store customer name, phone or email from revenue sheets (the column list in `etl/config.py`).
+- Never read or store customer name from revenue sheets; phone and email are read only to make the keyed one-way IIT customer code (`revenue_txn.cust_key`, IIT rows only) and are never stored, logged or printed (the column list in `etl/config.py`; Amit, 30 Oct 2026).
 - Keys only in env / GitHub secrets: BQ_CREDENTIALS, SUPABASE_URL, SUPABASE_SERVICE_KEY. Never print them.
 - Token economy: inspect headers + a few rows, aggregate in SQL; never dump whole sheets or tables into chat.
 - Run `python -m pytest -q` before every push; add a test with each rule change.
