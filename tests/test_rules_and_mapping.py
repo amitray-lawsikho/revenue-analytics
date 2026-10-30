@@ -146,3 +146,19 @@ def test_iit_customer_key():
     assert rows[1]["cust_key"] == "row:" + rows[1]["id"]                  # IIT row without phone/email: its own customer
     assert rows[2]["cust_key"] is None                                    # not IIT: no code
     assert all("cust_phone" not in r and "cust_email" not in r for r in rows)
+
+
+def test_tracker_codes():
+    """Leads Console Realtime Tracker (Amit, 30 Oct 2026): 'New enrollment' of Rs 999+ gets a phone code and an email
+    code (same keyed hash as IIT), so an uploaded lead can be matched to the caller who enrolled it; nothing else does."""
+    from etl.rules import customer_key, is_tracker_enrolment
+    assert is_tracker_enrolment("New enrollment", 999) and is_tracker_enrolment(" new  enrollment ", 5000)
+    assert not is_tracker_enrolment("New enrollment", 998) and not is_tracker_enrolment("New enrollment - balance payment", 5000)
+    k = b"test-key"
+    raw = [{"_row": 2, "date": "05/10/2026", "caller": "X", "fee_paid": "999", "enrollment": "New enrollment",
+            "course": "Contract drafting", "cust_phone": "+91 98765 43210", "cust_email": "A@B.com"},
+           {"_row": 3, "date": "05/10/2026", "caller": "X", "fee_paid": "500", "enrollment": "New enrollment",
+            "course": "Contract drafting", "cust_phone": "9876543210", "cust_email": "a@b.com"}]
+    rows = revenue_rows(raw, "Combined", lambda d: True, {}, {}, "L1", defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None}), k)
+    assert rows[0]["ph_key"] == customer_key("9876543210", None, k) and rows[0]["em_key"] == customer_key(None, "a@b.com", k)
+    assert rows[1]["ph_key"] is None and rows[1]["em_key"] is None

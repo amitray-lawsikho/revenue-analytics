@@ -98,6 +98,11 @@ def customer_key(phone: str | None, email: str | None, secret: bytes) -> str | N
     return hmac.new(secret, base.encode(), hashlib.sha256).hexdigest()[:32]
 
 
+def is_tracker_enrolment(enrollment: str | None, fee_paid: float | None) -> bool:
+    """Realtime Tracker's 'Actually Enrolled' rule (as on Streamlit): Enrollment exactly 'New enrollment' and Fee paid >= 999."""
+    return _norm_type(enrollment) == NEW_ENROLMENT and (fee_paid or 0) >= 999
+
+
 def is_direct(caller: str | None) -> bool:
     """Direct payments: 'Direct', 'Bootcamp - Direct', 'Bootcamp - Direct-International', ... (word 'direct')."""
     return re.search(r"(?<![a-z])direct(?![a-z])", norm_name(caller)) is not None

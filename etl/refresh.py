@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 from etl import config as C
-from etl.rules import customer_key, fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
+from etl.rules import customer_key, is_tracker_enrolment, fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly", "https://www.googleapis.com/auth/bigquery"]
@@ -110,8 +110,13 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
         iit = is_iit(r.get("course"))
         # IIT sold = unique customers per course: a keyed code from phone/email (IIT rows only; a row with neither is its own customer)
         ck = (customer_key(r.get("cust_phone"), r.get("cust_email"), secret) or f"row:{rid}") if iit and secret else None
+        # Leads Console Realtime Tracker (Amit, 30 Oct 2026): a phone code and an email code for every
+        # "New enrollment" of Rs 999+, so an uploaded lead can be matched to the caller who enrolled it
+        enrolled = secret is not None and is_tracker_enrolment(r.get("enrollment"), fee)
         out.append({
             "id": rid, "cust_key": ck,
+            "ph_key": customer_key(r.get("cust_phone"), None, secret) if enrolled else None,
+            "em_key": customer_key(None, r.get("cust_email"), secret) if enrolled else None,
             "txn_date": d.isoformat(), "caller_name_raw": raw_name, **a,
             "brand": (r.get("brand") or "").strip(), "course": (r.get("course") or "").strip(),
             "source": (r.get("source") or "").strip(), "enrollment_type": (r.get("enrollment") or "").strip(),
@@ -136,7 +141,7 @@ def bootcamp_rows(raw: list[dict], keep, load_id: str) -> list[dict]:
         a[0] += parse_amount(r.get("fee_paid"))
         a[1] += 1
     return [{
-        "id": hashlib.sha1(f"{C.BOOTCAMP_SHEET}|{'|'.join(k)}".encode()).hexdigest(), "cust_key": None,  # daily totals: no customers
+        "id": hashlib.sha1(f"{C.BOOTCAMP_SHEET}|{'|'.join(k)}".encode()).hexdigest(), "cust_key": None, "ph_key": None, "em_key": None,  # daily totals: no customers
         "txn_date": k[0], "caller_name_raw": "", "email": None, "caller": C.BOOTCAMP_CALLER, "caller_status": "direct",
         "team": C.BOOTCAMP_SHEET, "vertical": C.BOOTCAMP_SHEET, "brand": k[1], "course": k[2], "source": "",
         "enrollment_type": k[3], "is_new_enrolment": False, "fee_paid": round(v[0], 2),
