@@ -81,6 +81,42 @@ def attribute(raw_name: str, sheet_team: str, sheet_vertical: str, name_to_email
             "team": st or UNKNOWN_TEAM, "vertical": sv or UNKNOWN_TEAM}
 
 
+def build_monthwise(rows: list[dict]) -> dict:
+    """MonthwiseTeamList -> {"email": {email: {month: (team, vertical)}}, "name": {norm name: {...}}}.
+    Rows without a readable month or a vertical are skipped; old vertical names are renamed (C.VERTICAL_RENAMES);
+    the first row wins when a person appears twice in a month."""
+    renames = {k.strip().lower(): v for k, v in C.VERTICAL_RENAMES.items()}
+    idx: dict = {"email": defaultdict(dict), "name": defaultdict(dict)}
+    for r in rows:
+        d = parse_date(r.get("month"))
+        vertical = (r.get("vertical") or "").strip()
+        if not d or not vertical:
+            continue
+        m = d.replace(day=1)
+        tv = ((r.get("team") or "").strip() or NOT_ASSIGNED, renames.get(vertical.lower(), vertical))
+        email, n = (r.get("email") or "").strip().lower(), norm_name(r.get("name"))
+        if email:
+            idx["email"][email].setdefault(m, tv)
+        if n:
+            idx["name"][n].setdefault(m, tv)
+    return idx
+
+
+def monthwise_team(idx: dict, email: str | None, raw_name: str, d: date) -> tuple[str, str] | None:
+    """(team, vertical) for a payment on `d`: that month's MonthwiseTeamList row (email first, then name); if the
+    caller isn't listed that month, the nearest listed month (the earlier one on a tie); None if never listed."""
+    m = d.replace(day=1)
+    months = [idx["email"].get((email or "").lower()) or {}, idx["name"].get(norm_name(raw_name)) or {}]
+    for by_month in months:
+        if m in by_month:
+            return by_month[m]
+    for by_month in months:
+        if by_month:
+            best = min(by_month, key=lambda k: (abs((k.year - m.year) * 12 + k.month - m.month), k))
+            return by_month[best]
+    return None
+
+
 def hash_secret(store) -> bytes:
     """Key for the keyed one-way customer codes. It lives only in the database (_rev_secret, service role), so the
     Leads Console lookup (lc_rev_match) codes identifiers the same way without the key ever leaving Supabase."""
@@ -91,8 +127,9 @@ def hash_secret(store) -> bytes:
 
 
 def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str], roster_by_email: dict[str, dict],
-                 load_id: str, unmapped: dict, secret: bytes | None = None) -> list[dict]:
-    """Every payment row whose date `keep(d)` accepts, credited by `attribute`. Rows without a readable date are skipped."""
+                 load_id: str, unmapped: dict, secret: bytes | None = None, monthwise: dict | None = None) -> list[dict]:
+    """Every payment row whose date `keep(d)` accepts, credited by `attribute`. Rows without a readable date are skipped.
+    From C.MONTHWISE_START, a current or resigned caller takes the team/vertical of that month's MonthwiseTeamList."""
     out = []
     for r in raw:
         d = parse_date(r.get("date"))
@@ -101,6 +138,10 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
         raw_name = (r.get("caller") or "").strip()
         fee = parse_amount(r.get("fee_paid"))
         a = attribute(raw_name, r.get("team", ""), r.get("vertical", ""), name_to_email, roster_by_email)
+        if monthwise and d >= C.MONTHWISE_START and a["caller_status"] in ("current", "resigned"):
+            tv = monthwise_team(monthwise, a["email"], raw_name, d)
+            if tv:
+                a["team"], a["vertical"] = tv
         if a["caller_status"] == "resigned":
             u = unmapped[(a["caller"], "revenue")]
             u["rows"] += 1
@@ -244,13 +285,18 @@ def main(argv: list[str] | None = None) -> int:
             if al["email"] in roster_by_email:
                 name_to_email[norm_name(al["alias"])] = al["email"]
         detail["people_in_teamlist"] = len(roster)
+        mw_raw = read_tab(sheets, C.TEAM_SHEET_ID, C.MONTHWISE_TAB, C.MONTHWISE_COLUMNS, ("name", "vertical", "month"))
+        monthwise = build_monthwise(mw_raw)
+        if not monthwise["name"]:
+            raise RuntimeError(f"No people found in {C.MONTHWISE_TAB}")
+        detail["monthwise_people"] = len(monthwise["name"])
 
         unmapped: dict = defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None})
         need = ("date", "fee_paid", "caller", "enrollment")
         raw = read_tab(sheets, C.COMBINED_SHEET_ID, C.COMBINED_TAB, C.REVENUE_COLUMNS, need)
         secret = hash_secret(store)
         rev = revenue_rows(raw, C.COMBINED_TAB, lambda d: d >= C.CURRENT_FY_START, name_to_email, roster_by_email,
-                           load_id, unmapped, secret)
+                           load_id, unmapped, secret, monthwise)
         detail["combined_rows_without_date"] = sum(1 for r in raw if not parse_date(r.get("date")))
         detail["combined_rows_before_fy"] = sum(1 for r in raw if (d := parse_date(r.get("date"))) and d < C.CURRENT_FY_START)
         if not rev:
@@ -259,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
             for tab in C.CONSOLIDATED_TABS:
                 raw = read_tab(sheets, C.CONSOLIDATED_SHEET_ID, tab, C.REVENUE_COLUMNS, need)
                 rev += revenue_rows(raw, tab, lambda d: d < C.CURRENT_FY_START, name_to_email, roster_by_email,
-                                    load_id, unmapped, secret)
+                                    load_id, unmapped, secret, monthwise)
 
         # Bootcamp joining fees, daily totals only. If the sheet can't be read, keep the totals already stored.
         boot_ok = False

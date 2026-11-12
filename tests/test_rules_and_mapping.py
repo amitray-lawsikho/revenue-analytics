@@ -170,3 +170,42 @@ def test_customer_key_matches_postgres():
     from etl.rules import customer_key
     key = bytes.fromhex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
     assert customer_key("+91 98765 43210", None, key) == "87eb58fdcb7d86b835d2db7e417b8a51"
+
+
+def test_monthwise_teams_from_2025(): # Amit, 12 Nov 2026
+    from etl.refresh import build_monthwise, monthwise_team
+    mw = build_monthwise([
+        {"email": "a@x.in", "name": "Asha Rao", "team": "Team Elite Calling", "vertical": "Uzair-Elite", "month": "01/03/2025"},
+        {"email": "a@x.in", "name": "Asha Rao", "team": "Changemakers", "vertical": "Team Mayur", "month": "01/07/2025"},
+        {"email": "", "name": "Old Person", "team": "CD", "vertical": "Team Sharique", "month": "01/05/2025"},
+        {"email": "", "name": "Old Person", "team": "Batch", "vertical": "", "month": "01/06/2025"},   # no vertical: skipped
+        {"email": "z@x.in", "name": "Zed", "team": "X", "vertical": "Data Science Vertical", "month": "01/01/2025"},
+    ])
+    assert monthwise_team(mw, "a@x.in", "", date(2025, 3, 20)) == ("Team Elite Calling", "Team Uzair")   # renamed vertical
+    assert monthwise_team(mw, None, "asha rao", date(2025, 7, 2)) == ("Changemakers", "Team Mayur")       # by name
+    assert monthwise_team(mw, "a@x.in", "", date(2025, 5, 1)) == ("Team Elite Calling", "Team Uzair")    # nearest, tie -> earlier
+    assert monthwise_team(mw, "a@x.in", "", date(2026, 10, 1)) == ("Changemakers", "Team Mayur")         # nearest (latest)
+    assert monthwise_team(mw, None, "Old Person", date(2025, 6, 9)) == ("CD", "Team Uzair")
+    assert monthwise_team(mw, None, "Zed", date(2025, 1, 9)) == ("X", "Data Science Vertical")           # kept as written
+    assert monthwise_team(mw, None, "Nobody", date(2025, 1, 9)) is None
+
+    roster, n2e, _ = build_roster(ROSTER)
+    by_email = {r["email"]: r for r in roster}
+    raw = [
+        {"_row": 2, "date": "05/03/2025", "caller": "Asha Rao", "fee_paid": "100", "enrollment": "New enrollment"},
+        {"_row": 3, "date": "05/12/2024", "caller": "Asha Rao", "fee_paid": "100", "enrollment": "New enrollment"},   # before 2025
+        {"_row": 4, "date": "05/05/2025", "caller": "Old Person", "fee_paid": "100", "enrollment": "New enrollment"},
+        {"_row": 5, "date": "05/05/2025", "caller": "Nobody", "fee_paid": "100", "enrollment": "New enrollment",
+         "team": "T", "vertical": "V"},                                                                           # not listed: today's rule
+        {"_row": 6, "date": "05/05/2025", "caller": "Direct", "fee_paid": "100", "enrollment": "Other revenue",
+         "team": "Bootcamp - Direct", "vertical": "Direct"},                                                     # direct: today's rule
+    ]
+    rows = revenue_rows(raw, "X", lambda d: True, n2e, by_email, "L1",
+                        defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None}), None, mw)
+    assert [(r["caller"], r["team"], r["vertical"]) for r in rows] == [
+        ("Asha Rao", "Team Elite Calling", "Team Uzair"),
+        ("Asha Rao", "Elite", "Team Uzair"),
+        ("Old Person", "CD", "Team Uzair"),
+        ("Nobody", "T", "V"),
+        ("Direct", "Bootcamp - Direct", "Direct"),
+    ]

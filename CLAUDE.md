@@ -4,7 +4,7 @@ Revenue Metrics (overall, vertical, team, caller) for all LawSikho / Skill Arbit
 by day, week, month and financial year, compared with the same dates last year. Rules: [docs/definitions.md](docs/definitions.md) (never change without Amit's OK).
 
 ## How it runs
-- `etl/refresh.py`: Google Sheets (Teamlist, Combined, Consolidated FY tabs, Bootcamp Joining monthly tabs as daily totals) + BigQuery calling tables
+- `etl/refresh.py`: Google Sheets (Teamlist, MonthwiseTeamList = teams by month from Jan 2025, Combined, Consolidated FY tabs, Bootcamp Joining monthly tabs as daily totals) + BigQuery calling tables
   (`studious-apex-488820-c3.crm_dashboard`: acefone_calls, mcube_calls, ozonetel_calls, manual_calls) -> Supabase
   project "Counsellor Performance" (`oifzauaspvfkmzyutwtj`).
 - Repo `amitray-lawsikho/revenue-analytics` (renamed from counsellor-performance on 26 Oct 2026; `_dispatch_refresh` uses the new name).

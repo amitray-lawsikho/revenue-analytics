@@ -7,6 +7,32 @@ from datetime import date
 TEAM_SHEET_ID = os.environ.get("TEAM_SHEET_ID", "1OHn0KIS01NzmOiEID12j11G4ZhzeCiSe1X5KKNpLXns")
 TEAM_TAB = "Teamlist"
 
+# Teams by month (Amit, 12 Nov 2026): from MONTHWISE_START a payment takes the caller's team/vertical from this tab for the
+# payment's month (column "Month" = first date of the month); earlier payments keep the current Teamlist.
+MONTHWISE_TAB = "MonthwiseTeamList"
+MONTHWISE_START = date(2025, 1, 1)
+MONTHWISE_COLUMNS = {
+    "email": ("email id",),
+    "name": ("caller name",),
+    "team": ("team name",),
+    "vertical": ("vertical",),
+    "month": ("month",),
+}
+# Old vertical names in MonthwiseTeamList -> today's vertical (approved by Amit, 12 Nov 2026). Any other name is kept as written.
+VERTICAL_RENAMES = {
+    "Uzair-Elite": "Team Uzair", "Uzair - Bootcamp team": "Team Uzair", "Uzair - Test Prep team": "Team Uzair",
+    "Uzair - Jyoti team": "Team Uzair", "Uzair - Anas team": "Team Uzair", "Uzair Ahmad Khan": "Team Uzair",
+    "Team Sharique": "Team Uzair", "Team Sana": "Team Uzair",
+    "Anmol Gakhar": "Team Anmol", "Priya Singh": "Team Anmol", "Team Aishwar": "Team Anmol",
+    "Team Mayur (NCLEX)": "Team Mayur", "Team Ankur": "Team Mayur",
+    "Team Tathagat": "Team Darshan", "Team Shivya": "Team Darshan", "Team Aastha": "Team Darshan",
+    "Team Dhruv": "Team Darshan", "Team Dhruv & Shivya": "Team Darshan", "Team ID": "Team Darshan",
+    "Team Karman": "Team Karman", "Team Karman Kaur": "Team Karman",
+    "Team Shalu": "Team Shalu", "Shalu Jha": "Team Shalu",
+    "Community": "Team Abhipsha",
+    "Deepanshi": "Team Deepanshi",
+}
+
 COMBINED_SHEET_ID = os.environ.get("COMBINED_SHEET_ID", "1fFdwIWzS_JOcDLQ8ZP0BlNUm__OTW2vT99JB9hDukJA")
 COMBINED_TAB = "Combined"
 
