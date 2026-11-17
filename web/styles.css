@@ -220,3 +220,10 @@ tr.total td { font-weight: 700; border-top: 1px solid var(--line-2); color: var(
 .sbadge.bad { color: var(--bad); border-color: var(--bad); }
 .sbadge.warn { color: var(--gold-2); border-color: var(--gold); }
 .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 12px; }
+.sc { display: grid; gap: 4px; margin-top: 4px; font-size: 13px; color: var(--ink); }
+.sc-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.sc-k { min-width: 120px; color: var(--muted); font-size: 11.5px; }
+.sc-v { display: inline-flex; align-items: center; gap: 4px; margin-right: 12px; }
+.cpy { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 6px; font-size: 11px; line-height: 1; padding: 3px 5px; cursor: pointer; }
+.cpy:hover { color: var(--ink); border-color: var(--muted); }
+.cpy.ok { color: var(--good); border-color: var(--good); }

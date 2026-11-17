@@ -635,7 +635,9 @@ async function renderStudents(r, seq) {
   const k = d.kpi || {}, total = d.total || 0, rows = d.rows || [];
   const seg = Object.entries(FLAGS).map(([v, l]) => `<button data-flag="${esc(v)}" class="${st.flag === v ? "on" : ""}" ${FLAG_HINT[v] ? `title="${esc(FLAG_HINT[v])}"` : ""}>${l}${
     v === "Balance pending" ? ` (${num(k.pending)})` : v === "Paid more" ? ` (${num(k.over)})` : v === "Matches" ? ` (${num(k.match)})` : v === "No price" ? ` (${num(k.noprice)})` : v === "Balance only" ? ` (${num(k.balonly)})` : ""}</button>`).join("");
-  const contact = (x) => [...(x.phones || []), ...(x.emails || [])].map(esc).join("<br>") || `<span class="muted">–</span>`;
+  const alt = (n) => n > 1 ? ` <span class="muted">+${n - 1} alt</span>` : "";
+  const contact = (x) => [(x.phones || []).length ? esc(x.phones[0]) + alt(x.phones.length) : "", (x.emails || []).length ? esc(x.emails[0]) + alt(x.emails.length) : ""]
+    .filter(Boolean).join("<br>") || `<span class="muted">–</span>`;
   $("content").innerHTML = `
     <div class="kpis">
       ${kpi("Students", num(k.students), null, null, "", "", "", "Same phone or same email = one student")}
@@ -671,7 +673,15 @@ async function renderStudents(r, seq) {
 async function openStudent(id) {
   const d = await rpcJson("rev_student_json", { p_id: id }), x = d.student || {};
   $("s-id").textContent = `Student · ${id}`; $("s-name").textContent = x.name || "(no name)";
-  $("s-sub").innerHTML = [...(x.phones || []), ...(x.emails || [])].map(esc).join(" · ") + (x.first_date ? `<br>Payments ${nice(x.first_date)} – ${nice(x.last_date)}` : "");
+  // main phone / email = the one on the most recent payment; the rest are alternates (rebuild_students orders them newest first)
+  const ph = x.phones || [], em = x.emails || [];
+  const line = (label, vals) => vals.length ? `<div class="sc-row"><span class="sc-k">${label}</span><span>${vals.map((v) =>
+    `<span class="sc-v">${esc(v)}<button class="cpy" data-copy="${esc(v)}" title="Copy">⧉</button></span>`).join("")}</span></div>` : "";
+  $("s-sub").innerHTML = `<div class="sc">${line("Phone", ph.slice(0, 1)) || `<div class="sc-row"><span class="sc-k">Phone</span><span class="muted">–</span></div>`}
+    ${line(ph.length > 2 ? "Alternate phones" : "Alternate phone", ph.slice(1))}
+    ${line("Email", em.slice(0, 1)) || `<div class="sc-row"><span class="sc-k">Email</span><span class="muted">–</span></div>`}
+    ${line(em.length > 2 ? "Alternate emails" : "Alternate email", em.slice(1))}</div>`
+    + (x.first_date ? `<div style="margin-top:6px">Payments ${nice(x.first_date)} – ${nice(x.last_date)}</div>` : "");
   $("s-kpis").innerHTML = kpi("Courses enrolled", num(x.n_courses)) + kpi("Sales price", money(x.price)) + kpi("Paid", money(x.paid)) +
     kpi("Flags", `<span style="font-size:16px">${[x.n_pending ? `${x.n_pending} pending` : "", x.n_over ? `${x.n_over} paid more` : "", x.n_noprice ? `${x.n_noprice} no price` : "", x.n_balonly ? `${x.n_balonly} balance only` : ""].filter(Boolean).join(" · ") || "All match"}</span>`);
   $("s-courses").innerHTML = table([
@@ -795,6 +805,13 @@ $("update").addEventListener("click", update);
 $("clear-filters").addEventListener("click", clearFilters);
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
 $("s-close").addEventListener("click", () => { $("sdrawer").hidden = true; });
+$("sdrawer").addEventListener("click", async (e) => {   // copy a phone / email to the clipboard
+  const b = e.target.closest("[data-copy]"); if (!b) return;
+  const v = b.dataset.copy;
+  try { await navigator.clipboard.writeText(v); }
+  catch (_) { const t = document.createElement("textarea"); t.value = v; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); }
+  const old = b.textContent; b.textContent = "✓"; b.classList.add("ok"); setTimeout(() => { b.textContent = old; b.classList.remove("ok"); }, 1200);
+});
 $("menu").addEventListener("click", () => {
   if (matchMedia("(max-width: 820px)").matches) { $("side").classList.toggle("open"); return; }
   const cc = $("app").classList.toggle("collapsed"); try { localStorage.setItem("sa-side", cc ? "hidden" : "shown"); } catch (_) {}
