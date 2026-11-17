@@ -348,10 +348,9 @@ def main(argv: list[str] | None = None) -> int:
             sheets_reloaded = f"{C.COMBINED_TAB},{boot_q}" if boot_ok else C.COMBINED_TAB
             stale = f"sheet=in.({sheets_reloaded})&load_id=neq.{load_id}"
         store.delete("revenue_txn", stale)
-        # Student Dictionary: same reload rule as revenue_txn, then regroup students and recheck prices (all years)
+        # Student Dictionary rows: same reload rule as revenue_txn (students are regrouped at the end of the run)
         store.upsert("rev_student_txn", students, "txn_id")
         store.delete("rev_student_txn", f"load_id=neq.{load_id}" if full else f"sheet=eq.{C.COMBINED_TAB}&load_id=neq.{load_id}")
-        detail["students"] = store.rpc("rebuild_students")
         # the dashboard reads this daily summary; quick runs rebuild only the current FY (the only part they changed)
         detail["summary_rows"] = store.rpc("rebuild_rev_daily_from", {"p_from": None if full else C.CURRENT_FY_START.isoformat()})
         store.upsert("calls_daily", calls, "call_date,email,dialler")
@@ -378,6 +377,13 @@ def main(argv: list[str] | None = None) -> int:
                    for fy in sorted({fy_label(date.fromisoformat(r["txn_date"])) for r in rev})},
             "last_3_months": {k: {"revenue": round(v[0]), "new_enrolments": v[1]} for k, v in sorted(by_month.items())[-3:]},
         })
+        # Student Dictionary: regroup students and recheck every course's price (all years). Last, and never fails the
+        # refresh: if it does not finish, the page keeps the previous grouping until the next run.
+        try:
+            detail["students"] = store.rpc("rebuild_students", timeout=900)
+        except Exception as exc:  # noqa: BLE001
+            detail["students_error"] = f"{type(exc).__name__}: {exc}"[:300]
+            print("::warning::Student Dictionary not rebuilt: " + detail["students_error"].replace("\n", " "))
         store.insert("refresh_log", [{"status": "ok", "detail": detail}])
         print(json.dumps(detail, indent=2, default=str))
         return 0

@@ -17,10 +17,10 @@ class Store:
         key = key or os.environ["SUPABASE_SERVICE_KEY"]
         self.headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
-    def _call(self, method: str, path: str, **kw) -> requests.Response:
+    def _call(self, method: str, path: str, timeout: int = 120, **kw) -> requests.Response:
+        headers = {**self.headers, **kw.pop("headers", {})}
         for attempt in range(3):
-            r = requests.request(method, self.url + path, headers={**self.headers, **kw.pop("headers", {})},
-                                 timeout=120, **kw)
+            r = requests.request(method, self.url + path, headers=headers, timeout=timeout, **kw)
             if r.status_code < 500:
                 break
             time.sleep(2 ** attempt)
@@ -40,8 +40,8 @@ class Store:
     def delete(self, table: str, filter_: str) -> None:
         self._call("DELETE", f"{table}?{filter_}", headers={"Prefer": "return=minimal"})
 
-    def rpc(self, fn: str, args: dict | None = None):
-        return self._call("POST", f"rpc/{fn}", data=json.dumps(args or {})).json()
+    def rpc(self, fn: str, args: dict | None = None, timeout: int = 120):
+        return self._call("POST", f"rpc/{fn}", timeout=timeout, data=json.dumps(args or {})).json()
 
     def insert(self, table: str, rows: list[dict]) -> None:
         self._call("POST", table, headers={"Prefer": "return=minimal"}, data=json.dumps(rows, default=str))
