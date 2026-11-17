@@ -231,8 +231,10 @@ def test_student_dictionary_rows():
     rows = revenue_rows(raw, "Combined", lambda d: True, {}, {}, "L1",
                         defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None}), b"k", None, st)
     assert len(rows) == 3 and len(st) == 2
-    assert st[0] == {"txn_id": rows[0]["id"], "sheet": "Combined", "load_id": "L1", "cust_name": "Riya Sen", "phone": "9876543210",
-                     "email": "riya@x.com", "total_paid": 23600.0, "course_price": 60000.0}
+    assert {k: st[0][k] for k in ("txn_id", "sheet", "load_id", "cust_name", "phone", "email", "total_paid", "course_price")} == {
+        "txn_id": rows[0]["id"], "sheet": "Combined", "load_id": "L1", "cust_name": "Riya Sen", "phone": "9876543210",
+        "email": "riya@x.com", "total_paid": 23600.0, "course_price": 60000.0}
+    assert (st[0]["txn_date"], st[0]["course"], st[0]["enrollment_type"], st[0]["fee_paid"]) == ("2026-10-05", "US Law", "New enrollment", 20000.0)
     assert st[1]["txn_id"] == rows[2]["id"] and st[1]["phone"] is None and st[1]["total_paid"] is None and st[1]["cust_name"] is None
     assert all(k not in r for r in rows for k in ("cust_name", "cust_phone", "cust_email", "phone", "total_paid"))
 

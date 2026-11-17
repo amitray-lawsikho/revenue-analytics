@@ -172,8 +172,12 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
         if students is not None and is_student_payment(r.get("enrollment")):
             tp = str(r.get("total_paid") or "").strip()
             cp = str(r.get("course_price") or "").strip()
+            p = out[-1]
             students.append({
                 "txn_id": rid, "sheet": sheet, "load_id": load_id,
+                # the payment fields the student check needs, so rebuild_students() never reads the big revenue_txn
+                "txn_date": p["txn_date"], "course": p["course"], "brand": p["brand"], "enrollment_type": p["enrollment_type"],
+                "fee_paid": fee, "caller": p["caller"], "caller_status": p["caller_status"], "team": p["team"], "vertical": p["vertical"],
                 "cust_name": re.sub(r"\s+", " ", str(r.get("cust_name") or "")).strip()[:150] or None,
                 "phone": phone10(r.get("cust_phone")), "email": clean_email(r.get("cust_email")),
                 "total_paid": parse_amount(tp) if tp else None, "course_price": parse_amount(cp) if cp else None,
