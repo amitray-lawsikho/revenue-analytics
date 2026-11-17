@@ -381,10 +381,12 @@ def main(argv: list[str] | None = None) -> int:
                    for fy in sorted({fy_label(date.fromisoformat(r["txn_date"])) for r in rev})},
             "last_3_months": {k: {"revenue": round(v[0]), "new_enrolments": v[1]} for k, v in sorted(by_month.items())[-3:]},
         })
-        # Student Dictionary: regroup students and recheck every course's price (all years). Last, and never fails the
-        # refresh: if it does not finish, the page keeps the previous grouping until the next run.
+        # Student Dictionary: ask the database to regroup students and recheck every course's price (all years). It takes
+        # a few minutes, so pg_cron job rev-students-rebuild runs it in the database within a minute (rev_bg_job shows the
+        # result); the page keeps the previous grouping until then. Never fails the refresh.
         try:
-            detail["students"] = store.rpc("rebuild_students", timeout=900)
+            store.rpc("request_students_rebuild")
+            detail["students"] = {"payments": len(students), "regrouping": "requested"}
         except Exception as exc:  # noqa: BLE001
             detail["students_error"] = f"{type(exc).__name__}: {exc}"[:300]
             print("::warning::Student Dictionary not rebuilt: " + detail["students_error"].replace("\n", " "))
