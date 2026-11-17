@@ -209,3 +209,42 @@ def test_monthwise_teams_from_2025(): # Amit, 12 Nov 2026
         ("Nobody", "T", "V"),
         ("Direct", "Bootcamp - Direct", "Direct"),
     ]
+
+
+def test_student_dictionary_rows():
+    """Student Dictionary (Amit, 17 Nov 2026): New enrollment and balance-payment rows keep name, phone (last 10 digits),
+    email (lower case), Total fees paid (for Ops) and Course Price in a separate list (private table); other rows don't.
+    Name / phone / email never go into the revenue_txn rows."""
+    from etl.rules import clean_email, is_student_payment, phone10
+    assert phone10("+91 98765-43210") == "9876543210" and phone10("12345") is None and phone10("0000000000") is None
+    assert clean_email(" A.B@X.com ") == "a.b@x.com" and clean_email("not an email") is None
+    assert is_student_payment("New enrollment") and is_student_payment("New enrollment- Balance Payment")
+    assert is_student_payment("Bootcamp collections - balance payments") and is_student_payment("2nd installment")
+    assert not is_student_payment("Other revenue") and not is_student_payment("")
+    raw = [{"_row": 2, "date": "05/10/2026", "caller": "X", "fee_paid": "20,000", "enrollment": "New enrollment", "course": "US Law",
+            "cust_name": "  Riya   Sen ", "cust_phone": "+91 98765 43210", "cust_email": "Riya@X.com", "total_paid": "23,600", "course_price": "60,000"},
+           {"_row": 3, "date": "06/10/2026", "caller": "X", "fee_paid": "100", "enrollment": "Other revenue", "course": "Bootcamp",
+            "cust_name": "Riya", "cust_phone": "9876543210", "cust_email": "", "total_paid": "", "course_price": ""},
+           {"_row": 4, "date": "07/11/2026", "caller": "X", "fee_paid": "30000", "enrollment": "New enrollment - balance payment",
+            "course": "US Law", "cust_name": "", "cust_phone": "", "cust_email": "riya@x.com", "total_paid": "", "course_price": ""}]
+    st: list = []
+    rows = revenue_rows(raw, "Combined", lambda d: True, {}, {}, "L1",
+                        defaultdict(lambda: {"rows": 0, "fee_paid": 0.0, "last_seen": None}), b"k", None, st)
+    assert len(rows) == 3 and len(st) == 2
+    assert st[0] == {"txn_id": rows[0]["id"], "sheet": "Combined", "load_id": "L1", "cust_name": "Riya Sen", "phone": "9876543210",
+                     "email": "riya@x.com", "total_paid": 23600.0, "course_price": 60000.0}
+    assert st[1]["txn_id"] == rows[2]["id"] and st[1]["phone"] is None and st[1]["total_paid"] is None and st[1]["cust_name"] is None
+    assert all(k not in r for r in rows for k in ("cust_name", "cust_phone", "cust_email", "phone", "total_paid"))
+
+
+def test_student_columns_found():
+    """The Combined header: 'Name ' is the student name, 'Total fees paid (for Ops)' and 'Course Price' are found and do not
+    take the place of 'Fee paid' / 'Course'."""
+    from etl import config as C
+    header = ["LawSikho/Skill Arbitrage", "Dasboard Status", "Date", "Name ", "Contact No", "Email Id", "Manual/ Online Enroll", "Course",
+              "Total fees paid (for Ops)", "Fee paid", "Full/Installment (Welcome callers MIS)", "Retained revenue", "Mode of payment",
+              "Transaction ID", "Finance Dashboard", "USD/GBP/Euro", "International Amount",
+              "Caller name         (for ops) for enrollment link circulation", "Enrollment", "Source", "Course Price",
+              "Enrollment of this Month", "", "Team", "Vertical", "Month", "SALES LEADER"]
+    cols = find_columns(header, C.REVENUE_COLUMNS, ())
+    assert (cols["cust_name"], cols["course"], cols["total_paid"], cols["fee_paid"], cols["course_price"]) == (3, 7, 8, 9, 20)

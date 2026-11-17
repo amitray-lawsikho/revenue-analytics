@@ -7,6 +7,7 @@ const PAGES = {
   team: { title: "Teamwise Performance", level: "team", label: "Team" },
   caller: { title: "Caller Wise Performance", level: "caller", label: "Caller" },
   iit: { title: "IIT Sold", level: "iit" },
+  students: { title: "Student Dictionary", level: "students" },
 };
 const LEVELS = { vertical: "Vertical", team: "Team", caller: "Caller" };
 const MODES = { all: "Revenue (Fee paid)", calling: "Calling revenue", collection: "Collection revenue", other: "Other revenue", iit: "IIT revenue" };
@@ -209,6 +210,7 @@ async function render() {
   busy(true);
   try {
     if (S.page === "overall") await renderOverall(seq);
+    else if (S.page === "students") { const r = range(); if (!r.from || !r.to || r.from > r.to) return; await renderStudents(r, seq); }
     else { const r = range(); if (!r.from || !r.to || r.from > r.to) return; setSub();
       const page = S.page === "iit" ? { level: S.iitLevel, label: LEVELS[S.iitLevel], iit: true } : PAGES[S.page];
       await renderLevel(r, seq, page); }
@@ -613,6 +615,76 @@ function buildOptions() {
   for (const id of Object.keys(MS)) { msButton(id); const box = $(`ms-${id}`); if (box && !box.querySelector(".ms-pop").hidden) msList(id); }
 }
 
+/* ---------- Student Dictionary (Amit, 17 Nov 2026) ---------- */
+// One row per student (same phone or same email, chained), courses enrolled in the chosen dates and filters.
+// Sales price = Course Price on the New enrollment row; paid = Total fees paid (for Ops) of New enrollment + balance rows.
+const FLAGS = { "": "All", "Balance pending": "Balance pending", "Paid more": "Paid more", Matches: "Matches", "No price": "No price", "Balance only": "Balance only" };
+const FLAG_HINT = { "Balance pending": "paid less than the Course Price", "Paid more": "paid more than the Course Price",
+  Matches: "paid = Course Price (within ₹1)", "No price": "Course Price blank on the New enrollment row",
+  "Balance only": "balance payments whose course name has no New enrollment for this student (often spelled differently)" };
+const flagBadge = (st) => `<span class="sbadge ${st === "Balance pending" ? "warn" : st === "Paid more" ? "bad" : st === "Matches" ? "good" : ""}" title="${esc(FLAG_HINT[st] || "")}">${esc(st)}</span>`;
+S.st = { flag: "", q: "", pg: 0, size: 50 };
+async function renderStudents(r, seq) {
+  setSub();
+  $("page-sub").innerHTML = `Students with a course enrolment in ${nice(r.from)} – ${nice(r.to)} &nbsp;·&nbsp; sales price = Course Price · paid = Total fees paid (for Ops)`;
+  const f = filters("caller"), st = S.st;
+  const sig = JSON.stringify([r.from, r.to, f, st.flag, st.q]); if (sig !== st.sig) { st.sig = sig; st.pg = 0; }   // new filters: back to page 1
+  const d = await rpcJson("rev_students_json", { p_from: r.from, p_to: r.to, ...f, p_flag: st.flag || null, p_search: st.q || null,
+    p_offset: st.pg * st.size, p_limit: st.size });
+  if (seq !== S.seq) return;
+  const k = d.kpi || {}, total = d.total || 0, rows = d.rows || [];
+  const seg = Object.entries(FLAGS).map(([v, l]) => `<button data-flag="${esc(v)}" class="${st.flag === v ? "on" : ""}" ${FLAG_HINT[v] ? `title="${esc(FLAG_HINT[v])}"` : ""}>${l}${
+    v === "Balance pending" ? ` (${num(k.pending)})` : v === "Paid more" ? ` (${num(k.over)})` : v === "Matches" ? ` (${num(k.match)})` : v === "No price" ? ` (${num(k.noprice)})` : v === "Balance only" ? ` (${num(k.balonly)})` : ""}</button>`).join("");
+  const contact = (x) => [...(x.phones || []), ...(x.emails || [])].map(esc).join("<br>") || `<span class="muted">–</span>`;
+  $("content").innerHTML = `
+    <div class="kpis">
+      ${kpi("Students", num(k.students), null, null, "", "", "", "Same phone or same email = one student")}
+      ${kpi("Courses enrolled", num(k.courses))}
+      ${kpi("Sales price", money(k.price), null, null, "", "", "", "Sum of Course Price on the New enrollment rows")}
+      ${kpi("Paid", money(k.paid), null, null, "", "", "", "Total fees paid (for Ops) of New enrollment + balance rows")}
+      ${kpi("Balance pending", num(k.pending), null, null, "", "", `${money(k.gap_pending)} still to collect`, FLAG_HINT["Balance pending"])}
+      ${kpi("Paid more", num(k.over), null, null, "", "", `${money(k.gap_over)} above the price`, FLAG_HINT["Paid more"])}
+    </div>
+    <div class="card">
+      <div class="card-h" style="flex-wrap:wrap;gap:10px"><div class="seg sm" id="st-flag">${seg}</div>
+        <input id="st-q" type="search" placeholder="Search name, phone, email or ID" value="${esc(st.q)}" style="max-width:280px"></div>
+      <div class="table-wrap"><table><thead><tr><th class="l">Student</th><th class="l">Phone / email</th><th class="l">Courses (in these dates)</th>
+        <th>Courses</th><th>Sales price</th><th>Paid</th><th class="l">Flags</th></tr></thead><tbody>
+      ${rows.map((x, i) => `<tr class="click" data-sid="${esc(x.student_id)}">
+        <td class="l"><b>${esc(x.name || "(no name)")}</b><div class="muted small">${esc(x.student_id)}</div></td>
+        <td class="l small">${contact(x)}</td>
+        <td class="l small" style="white-space:normal;max-width:360px">${esc(x.courses || "")}</td>
+        <td class="num">${num(x.n_courses)}${x.all_courses > x.n_courses ? `<div class="muted small">${num(x.all_courses)} in all</div>` : ""}</td>
+        <td class="num">${money(x.price)}</td><td class="num">${money(x.paid)}</td>
+        <td class="l">${[x.n_pending ? flagBadge("Balance pending") : "", x.n_over ? flagBadge("Paid more") : "", x.n_noprice ? flagBadge("No price") : "",
+          x.n_balonly ? flagBadge("Balance only") : "", !x.n_pending && !x.n_over && !x.n_noprice && !x.n_balonly ? flagBadge("Matches") : ""].join(" ")}</td></tr>`).join("")
+        || `<tr><td class="l muted" colspan="7">No students for these filters.</td></tr>`}
+      </tbody></table></div>
+      <div class="pager"><span class="muted small">${total ? `${num(st.pg * st.size + 1)}–${num(Math.min(total, (st.pg + 1) * st.size))} of ${num(total)} students` : ""}</span>
+        <button class="btn ghost sm" id="st-prev" ${st.pg ? "" : "disabled"}>← Prev</button><button class="btn ghost sm" id="st-next" ${(st.pg + 1) * st.size < total ? "" : "disabled"}>Next →</button></div>
+    </div>`;
+  document.querySelectorAll("#st-flag [data-flag]").forEach((b) => b.onclick = () => { st.flag = b.dataset.flag; st.pg = 0; render(); });
+  let t; $("st-q").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); st.pg = 0; render(); }, 450); };
+  $("st-prev").onclick = () => { st.pg--; render(); }; $("st-next").onclick = () => { st.pg++; render(); };
+  document.querySelectorAll("[data-sid]").forEach((tr) => tr.onclick = () => openStudent(tr.dataset.sid));
+}
+async function openStudent(id) {
+  const d = await rpcJson("rev_student_json", { p_id: id }), x = d.student || {};
+  $("s-id").textContent = `Student · ${id}`; $("s-name").textContent = x.name || "(no name)";
+  $("s-sub").innerHTML = [...(x.phones || []), ...(x.emails || [])].map(esc).join(" · ") + (x.first_date ? `<br>Payments ${nice(x.first_date)} – ${nice(x.last_date)}` : "");
+  $("s-kpis").innerHTML = kpi("Courses enrolled", num(x.n_courses)) + kpi("Sales price", money(x.price)) + kpi("Paid", money(x.paid)) +
+    kpi("Flags", `<span style="font-size:16px">${[x.n_pending ? `${x.n_pending} pending` : "", x.n_over ? `${x.n_over} paid more` : "", x.n_noprice ? `${x.n_noprice} no price` : "", x.n_balonly ? `${x.n_balonly} balance only` : ""].filter(Boolean).join(" · ") || "All match"}</span>`);
+  $("s-courses").innerHTML = table([
+    { h: "Course", l: 1, f: (c) => `<span style="white-space:normal">${esc(c.course)}</span><div class="muted small">${esc(c.brand || "")}${c.caller ? " · " + esc(c.caller) : ""}${c.first_date ? " · " + nice(c.first_date) : ""}</div>` },
+    { h: "Sales price", f: (c) => money(c.price) }, { h: "New enrolment", f: (c) => money(c.new_paid) }, { h: "Balances", f: (c) => money(c.bal_paid) },
+    { h: "Paid", f: (c) => money(c.paid) }, { h: "Difference", f: (c) => (c.price ? money(c.paid - c.price) : "–") }, { h: "Status", l: 1, f: (c) => flagBadge(c.status) }], d.courses || []);
+  $("s-pays").innerHTML = table([
+    { h: "Date", l: 1, f: (p) => nice(p.txn_date) }, { h: "Course", l: 1, f: (p) => `<span style="white-space:normal">${esc(p.course)}</span>` },
+    { h: "Enrollment", l: 1, k: "enrollment_type" }, { h: "Fee paid", f: (p) => money(p.fee_paid) }, { h: "Total fees paid (Ops)", f: (p) => money(p.total_paid) },
+    { h: "Course Price", f: (p) => money(p.course_price) }, { h: "Caller", l: 1, k: "caller" }], d.payments || []);
+  $("sdrawer").hidden = false; $("sdrawer").scrollTop = 0;
+}
+
 /* ---------- other filters ---------- */
 function showFilters() {
   document.querySelector(".filters").hidden = S.page === "overall";   // Overall always shows every year
@@ -624,7 +696,8 @@ function fillFy() {
 }
 function clearFilters() {
   Object.values(S.sel).forEach((set) => set.clear());
-  $("f-status").value = ""; $("f-rtype").value = "all"; $("drawer").hidden = true;
+  $("f-status").value = ""; $("f-rtype").value = "all"; $("drawer").hidden = true; $("sdrawer").hidden = true;
+  S.st = { flag: "", q: "", pg: 0, size: 50 };
   buildOptions(); setPreset("month");
 }
 function markPreset(p) { S.preset = p; document.querySelectorAll("#presets button").forEach((b) => b.classList.toggle("on", b.dataset.p === p)); }
@@ -635,7 +708,7 @@ function setPage(p) {
   S.page = p; S.sort = { k: "revenue", dir: -1 };
   $("page-title").textContent = PAGES[p].title; document.title = `${PAGES[p].title} · Revenue Analytics Dashboard`;
   document.querySelectorAll(".side nav a").forEach((a) => a.classList.toggle("on", a.dataset.page === p));
-  $("side").classList.remove("open"); $("drawer").hidden = true;
+  $("side").classList.remove("open"); $("drawer").hidden = true; $("sdrawer").hidden = true;
   showFilters(); render();
 }
 
@@ -687,6 +760,10 @@ async function start() {
   if (!ok) { $("auth").hidden = false; $("app").hidden = true;
     $("auth-msg").textContent = `${session.user.email} is signed in but not on the allowed list. Ask Amit to add it.`; return; }
   $("auth").hidden = true; $("app").hidden = false;
+  // Student Dictionary shows student contacts: only emails listed in allowed_users see it
+  const { data: canStudents } = await sb.rpc("can_see_students");
+  document.querySelectorAll('[data-page="students"]').forEach((a) => { a.hidden = !canStudents; a.previousElementSibling?.classList.contains("nav-h") && (a.previousElementSibling.hidden = !canStudents); });
+  if (!canStudents && location.hash === "#students") location.hash = "#overall";
   fillFy(); Object.keys(MS).forEach(msInit);
   const [f, t, g] = preset("month"); $("from").value = f; $("to").value = t; $("grain").value = g; markPreset("month");
   setPage(location.hash.slice(1));
@@ -717,6 +794,7 @@ $("f-rtype").addEventListener("change", () => { $("drawer").hidden = true; rende
 $("update").addEventListener("click", update);
 $("clear-filters").addEventListener("click", clearFilters);
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
+$("s-close").addEventListener("click", () => { $("sdrawer").hidden = true; });
 $("menu").addEventListener("click", () => {
   if (matchMedia("(max-width: 820px)").matches) { $("side").classList.toggle("open"); return; }
   const cc = $("app").classList.toggle("collapsed"); try { localStorage.setItem("sa-side", cc ? "hidden" : "shown"); } catch (_) {}

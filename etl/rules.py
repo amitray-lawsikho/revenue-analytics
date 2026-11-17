@@ -112,3 +112,22 @@ def fy_label(d: date) -> str:
     """Indian financial year: 2026-10-23 -> 'FY2026-27'."""
     start = d.year if d.month >= 4 else d.year - 1
     return f"FY{start}-{str(start + 1)[-2:]}"
+
+
+# ---------------------------------------------------------------- Student Dictionary (Amit, 17 Nov 2026)
+
+def phone10(phone: str | None) -> str | None:
+    """Last 10 digits of a phone ('+91 98765-43210' -> '9876543210'); None when shorter or all zeros."""
+    d = re.sub(r"\D", "", str(phone or ""))
+    return d[-10:] if len(d) >= 10 and set(d[-10:]) != {"0"} else None
+
+
+def clean_email(email: str | None) -> str | None:
+    e = str(email or "").strip().lower()
+    return e if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", e) else None
+
+
+def is_student_payment(enrollment: str | None) -> bool:
+    """Rows kept for the Student Dictionary: 'New enrollment' and every balance / instalment payment."""
+    t = _norm_type(enrollment)
+    return t == NEW_ENROLMENT or "balance" in t or "installment" in t or "instalment" in t

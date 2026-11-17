@@ -213,3 +213,10 @@ tr.total td { font-weight: 700; border-top: 1px solid var(--line-2); color: var(
 .filters-top #clear-filters { margin-left: auto; }
 .monogram { font: 700 20px Inter, system-ui, sans-serif; letter-spacing: 0; line-height: 1; }
 .monogram.lg { font-size: 32px; }
+
+/* Student Dictionary */
+.sbadge { display: inline-block; font: 600 11px Inter, sans-serif; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; margin: 1px 0; }
+.sbadge.good { color: var(--good); border-color: var(--good); }
+.sbadge.bad { color: var(--bad); border-color: var(--bad); }
+.sbadge.warn { color: var(--gold-2); border-color: var(--gold); }
+.pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 12px; }

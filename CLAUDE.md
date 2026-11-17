@@ -16,7 +16,10 @@ by day, week, month and financial year, compared with the same dates last year. 
   (09:00 full, 17:00, 23:00 IST; 3 a day to save GitHub minutes) using the Vault secret github_token; get_perf/get_courses (calling, unused). Change schema with a migration, keep RLS on.
 
 ## Rules
-- Never read or store customer name from revenue sheets; phone and email are read only to make keyed one-way codes (`revenue_txn.cust_key` for IIT rows; `ph_key`/`em_key` for New enrollment ≥ ₹999, used by the Leads Console Realtime Tracker through `lc_rev_match`; Amit, 30 Oct 2026) and are never stored, logged or printed (the column list in `etl/config.py`; Amit, 30 Oct 2026).
+- Student Dictionary (Amit, 17 Nov 2026): student name, phone (last 10 digits), email, Total fees paid (for Ops) and Course Price of New enrollment
+  and balance rows are stored only in private tables `rev_student_txn` / `rev_student` / `rev_student_course` (RLS on, no policies), rebuilt by
+  `rebuild_students()` each run and read only via `rev_students_json` / `rev_student_json` by emails in `allowed_users`. Never log, print or dump them.
+- Outside the Student Dictionary, phone and email are read only to make keyed one-way codes (`revenue_txn.cust_key` for IIT rows; `ph_key`/`em_key` for New enrollment ≥ ₹999, used by the Leads Console Realtime Tracker through `lc_rev_match`; Amit, 30 Oct 2026) and are never stored, logged or printed (the column list in `etl/config.py`; Amit, 30 Oct 2026).
 - Keys only in env / GitHub secrets: BQ_CREDENTIALS, SUPABASE_URL, SUPABASE_SERVICE_KEY. Never print them. The customer-code key lives only in Supabase (`_rev_secret`, read via `_rev_hash_key`, service role).
 - Token economy: inspect headers + a few rows, aggregate in SQL; never dump whole sheets or tables into chat.
 - Run `python -m pytest -q` before every push; add a test with each rule change.

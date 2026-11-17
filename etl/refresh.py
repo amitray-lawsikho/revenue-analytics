@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 from etl import config as C
-from etl.rules import customer_key, is_tracker_enrolment, fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
+from etl.rules import clean_email, customer_key, is_student_payment, phone10, is_tracker_enrolment, fy_label, is_direct, is_iit, is_new_enrolment, norm_name, parse_amount, parse_date, revenue_type
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly", "https://www.googleapis.com/auth/bigquery"]
@@ -127,9 +127,12 @@ def hash_secret(store) -> bytes:
 
 
 def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str], roster_by_email: dict[str, dict],
-                 load_id: str, unmapped: dict, secret: bytes | None = None, monthwise: dict | None = None) -> list[dict]:
+                 load_id: str, unmapped: dict, secret: bytes | None = None, monthwise: dict | None = None,
+                 students: list | None = None) -> list[dict]:
     """Every payment row whose date `keep(d)` accepts, credited by `attribute`. Rows without a readable date are skipped.
-    From C.MONTHWISE_START, a current or resigned caller takes the team/vertical of that month's MonthwiseTeamList."""
+    From C.MONTHWISE_START, a current or resigned caller takes the team/vertical of that month's MonthwiseTeamList.
+    `students` (Student Dictionary) collects name / phone / email / Total fees paid / Course Price of New enrollment and
+    balance-payment rows, for the private table rev_student_txn."""
     out = []
     for r in raw:
         d = parse_date(r.get("date"))
@@ -166,6 +169,15 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
             "rev_type": revenue_type(r.get("enrollment")), "is_iit": iit, "n_payments": 1,
             "sheet": sheet, "load_id": load_id,
         })
+        if students is not None and is_student_payment(r.get("enrollment")):
+            tp = str(r.get("total_paid") or "").strip()
+            cp = str(r.get("course_price") or "").strip()
+            students.append({
+                "txn_id": rid, "sheet": sheet, "load_id": load_id,
+                "cust_name": re.sub(r"\s+", " ", str(r.get("cust_name") or "")).strip()[:150] or None,
+                "phone": phone10(r.get("cust_phone")), "email": clean_email(r.get("cust_email")),
+                "total_paid": parse_amount(tp) if tp else None, "course_price": parse_amount(cp) if cp else None,
+            })
     return out
 
 
@@ -295,8 +307,9 @@ def main(argv: list[str] | None = None) -> int:
         need = ("date", "fee_paid", "caller", "enrollment")
         raw = read_tab(sheets, C.COMBINED_SHEET_ID, C.COMBINED_TAB, C.REVENUE_COLUMNS, need)
         secret = hash_secret(store)
+        students: list[dict] = []   # Student Dictionary rows (private table)
         rev = revenue_rows(raw, C.COMBINED_TAB, lambda d: d >= C.CURRENT_FY_START, name_to_email, roster_by_email,
-                           load_id, unmapped, secret, monthwise)
+                           load_id, unmapped, secret, monthwise, students)
         detail["combined_rows_without_date"] = sum(1 for r in raw if not parse_date(r.get("date")))
         detail["combined_rows_before_fy"] = sum(1 for r in raw if (d := parse_date(r.get("date"))) and d < C.CURRENT_FY_START)
         if not rev:
@@ -305,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
             for tab in C.CONSOLIDATED_TABS:
                 raw = read_tab(sheets, C.CONSOLIDATED_SHEET_ID, tab, C.REVENUE_COLUMNS, need)
                 rev += revenue_rows(raw, tab, lambda d: d < C.CURRENT_FY_START, name_to_email, roster_by_email,
-                                    load_id, unmapped, secret, monthwise)
+                                    load_id, unmapped, secret, monthwise, students)
 
         # Bootcamp joining fees, daily totals only. If the sheet can't be read, keep the totals already stored.
         boot_ok = False
@@ -335,6 +348,10 @@ def main(argv: list[str] | None = None) -> int:
             sheets_reloaded = f"{C.COMBINED_TAB},{boot_q}" if boot_ok else C.COMBINED_TAB
             stale = f"sheet=in.({sheets_reloaded})&load_id=neq.{load_id}"
         store.delete("revenue_txn", stale)
+        # Student Dictionary: same reload rule as revenue_txn, then regroup students and recheck prices (all years)
+        store.upsert("rev_student_txn", students, "txn_id")
+        store.delete("rev_student_txn", f"load_id=neq.{load_id}" if full else f"sheet=eq.{C.COMBINED_TAB}&load_id=neq.{load_id}")
+        detail["students"] = store.rpc("rebuild_students")
         # the dashboard reads this daily summary; quick runs rebuild only the current FY (the only part they changed)
         detail["summary_rows"] = store.rpc("rebuild_rev_daily_from", {"p_from": None if full else C.CURRENT_FY_START.isoformat()})
         store.upsert("calls_daily", calls, "call_date,email,dialler")
