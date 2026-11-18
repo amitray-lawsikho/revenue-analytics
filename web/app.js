@@ -799,7 +799,7 @@ async function start() {
   lastRun().then(showFresh); loadDims();   // in the background: never delay the first page
   setTimeout(() => agg({ p_from: "2023-04-01", p_to: istToday(), p_grain: "day", p_group: "none" }).catch(() => {}), 1500);
 }
-$("signout").addEventListener("click", async () => { await sb.auth.signOut({ scope: "local" }); location.replace(PORTAL); });
+$("signout").addEventListener("click", async () => { await sb.auth.signOut({ scope: "local" }); location.replace(PORTAL + "?signout=1"); });
 
 /* ---------- events ---------- */
 window.addEventListener("hashchange", () => setPage(location.hash.slice(1)));
