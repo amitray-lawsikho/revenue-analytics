@@ -227,3 +227,14 @@ tr.total td { font-weight: 700; border-top: 1px solid var(--line-2); color: var(
 .cpy { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 6px; font-size: 11px; line-height: 1; padding: 3px 5px; cursor: pointer; }
 .cpy:hover { color: var(--ink); border-color: var(--muted); }
 .cpy.ok { color: var(--good); border-color: var(--good); }
+
+/* Sales Intelligence Portal (Amit, 18 Nov 2026): a way back to the portal home, and who is signed in */
+.si-home { display: flex; align-items: center; gap: 9px; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--line-2); color: var(--ink);
+  text-decoration: none; font: 600 13px Inter, system-ui, sans-serif; background: var(--gold-soft); }
+.si-home svg { width: 17px; height: 17px; fill: none; stroke: var(--gold); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.si-home:hover { border-color: var(--gold); }
+.si-me { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--panel-2); min-width: 0; }
+.si-av { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--gold); color: var(--on-gold); font: 700 14px Inter, sans-serif; }
+.si-t { display: grid; min-width: 0; line-height: 1.25; }
+.si-t b { font: 600 13.5px Inter, sans-serif; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-t small { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
