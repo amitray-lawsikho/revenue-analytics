@@ -794,7 +794,7 @@ $("auth-signup").addEventListener("click", async () => {
   const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
   $("auth-msg").textContent = error ? error.message : "Check your inbox and click the confirmation link, then sign in here.";
 });
-$("signout").addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
+$("signout").addEventListener("click", async () => { await sb.auth.signOut({ scope: "local" }); location.reload(); });
 
 /* ---------- events ---------- */
 window.addEventListener("hashchange", () => setPage(location.hash.slice(1)));
