@@ -765,13 +765,22 @@ $("theme").addEventListener("click", () => {
 
 /* ---------- auth + start ---------- */
 async function loadDims() { try { S.dims = await rpcJson("rev_dims_json", {}); buildOptions(); } catch (_) {} }
+// Sales Intelligence Portal (Amit, 18 Nov 2026): this dashboard has no sign-in of its own. Without a session (or without access)
+// it goes to the portal, which checks the sign-in and access and comes back with a one-time sign-in link.
+const PORTAL = "https://sales-intelligence-portal.amitray.workers.dev/";
+function toPortal(key) {
+  let last = 0; try { last = +sessionStorage.getItem("si-hop") || 0; } catch (_) {}
+  if (Date.now() - last < 30000) return false;   // just came back from the portal and still not in: show the card, never loop
+  try { sessionStorage.setItem("si-hop", String(Date.now())); } catch (_) {}
+  location.replace(`${PORTAL}go.html?d=${key}`); return true;
+}
 async function start() {
   themeButton();
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) { $("auth").hidden = false; $("app").hidden = true; return; }
+  if (!session) { if (toPortal("revenue")) return; $("auth").hidden = false; $("app").hidden = true; return; }
   const { data: ok } = await sb.rpc("is_allowed");
-  if (!ok) { $("auth").hidden = false; $("app").hidden = true;
-    $("auth-msg").textContent = `${session.user.email} is signed in but not on the allowed list. Ask Amit to add it.`; return; }
+  if (!ok) { if (toPortal("revenue")) return; $("auth").hidden = false; $("app").hidden = true;
+    $("auth-msg").textContent = `${session.user.email} has no access to this dashboard. Ask a portal admin to give it in the Sales Intelligence Portal.`; return; }
   $("auth").hidden = true; $("app").hidden = false;
   // Student Dictionary shows student contacts: only emails listed in allowed_users see it
   const { data: canStudents } = await sb.rpc("can_see_students");
@@ -783,18 +792,7 @@ async function start() {
   lastRun().then(showFresh); loadDims();   // in the background: never delay the first page
   setTimeout(() => agg({ p_from: "2023-04-01", p_to: istToday(), p_grain: "day", p_group: "none" }).catch(() => {}), 1500);
 }
-$("auth-form").addEventListener("submit", async (e) => {
-  e.preventDefault(); $("auth-msg").textContent = "Signing in…";
-  const { error } = await sb.auth.signInWithPassword({ email: $("auth-email").value.trim().toLowerCase(), password: $("auth-pass").value });
-  $("auth-msg").textContent = error ? error.message : ""; if (!error) start();
-});
-$("auth-signup").addEventListener("click", async () => {
-  const email = $("auth-email").value.trim().toLowerCase(), password = $("auth-pass").value;
-  if (!email || password.length < 8) { $("auth-msg").textContent = "Enter your email and a password of 8+ characters first."; return; }
-  const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } });
-  $("auth-msg").textContent = error ? error.message : "Check your inbox and click the confirmation link, then sign in here.";
-});
-$("signout").addEventListener("click", async () => { await sb.auth.signOut({ scope: "local" }); location.reload(); });
+$("signout").addEventListener("click", async () => { await sb.auth.signOut({ scope: "local" }); location.replace(PORTAL); });
 
 /* ---------- events ---------- */
 window.addEventListener("hashchange", () => setPage(location.hash.slice(1)));
