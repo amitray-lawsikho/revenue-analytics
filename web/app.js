@@ -670,6 +670,8 @@ async function renderStudents(r, seq) {
   $("st-prev").onclick = () => { st.pg--; render(); }; $("st-next").onclick = () => { st.pg++; render(); };
   document.querySelectorAll("[data-sid]").forEach((tr) => tr.onclick = () => openStudent(tr.dataset.sid));
 }
+// Total fees paid filled but Fee paid blank = a repeat line of the same payment (e.g. Bajaj loan): not counted (Amit, 18 Nov 2026)
+const skipRow = (p) => !Number(p.fee_paid) && Number(p.total_paid) > 0;
 async function openStudent(id) {
   const d = await rpcJson("rev_student_json", { p_id: id }), x = d.student || {};
   $("s-id").textContent = `Student · ${id}`; $("s-name").textContent = x.name || "(no name)";
@@ -690,7 +692,8 @@ async function openStudent(id) {
     { h: "Paid", f: (c) => money(c.paid) }, { h: "Difference", f: (c) => (c.price ? money(c.paid - c.price) : "–") }, { h: "Status", l: 1, f: (c) => flagBadge(c.status) }], d.courses || []);
   $("s-pays").innerHTML = table([
     { h: "Date", l: 1, f: (p) => nice(p.txn_date) }, { h: "Course", l: 1, f: (p) => `<span style="white-space:normal">${esc(p.course)}</span>` },
-    { h: "Enrollment", l: 1, k: "enrollment_type" }, { h: "Fee paid", f: (p) => money(p.fee_paid) }, { h: "Total fees paid (Ops)", f: (p) => money(p.total_paid) },
+    { h: "Enrollment", l: 1, f: (p) => esc(p.enrollment_type || "") + (skipRow(p) ? `<div class="muted small" title="Total fees paid is filled but Fee paid is blank: a repeat line of the same payment">not counted</div>` : "") },
+    { h: "Fee paid", f: (p) => money(p.fee_paid) }, { h: "Total fees paid (Ops)", f: (p) => skipRow(p) ? `<s class="muted">${money(p.total_paid)}</s>` : money(p.total_paid) },
     { h: "Course Price", f: (p) => money(p.course_price) }, { h: "Caller", l: 1, k: "caller" }], d.payments || []);
   $("sdrawer").hidden = false; $("sdrawer").scrollTop = 0;
 }
