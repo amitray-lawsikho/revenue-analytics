@@ -649,7 +649,9 @@ async function renderStudents(r, seq) {
     </div>
     <div class="card">
       <div class="card-h" style="flex-wrap:wrap;gap:10px"><div class="seg sm" id="st-flag">${seg}</div>
-        <input id="st-q" type="search" placeholder="Search name, phone, email or ID" value="${esc(st.q)}" style="max-width:280px"></div>
+        <div style="display:flex;gap:8px;align-items:center;margin-left:auto">
+          <button class="btn sm" id="st-export" title="Download every student in this view (${esc(FLAGS[st.flag])}, these dates, filters and search) as a CSV file for Excel">Export</button>
+          <input id="st-q" type="search" placeholder="Search name, phone, email or ID" value="${esc(st.q)}" style="max-width:280px"></div></div>
       <div class="table-wrap"><table><thead><tr><th class="l">Student</th><th class="l">Phone / email</th><th class="l">Courses (in these dates)</th>
         <th>Courses</th><th>Sales price</th><th>Paid</th><th class="l">Flags</th></tr></thead><tbody>
       ${rows.map((x, i) => `<tr class="click" data-sid="${esc(x.student_id)}">
@@ -669,6 +671,34 @@ async function renderStudents(r, seq) {
   let t; $("st-q").oninput = (e) => { clearTimeout(t); t = setTimeout(() => { st.q = e.target.value.trim(); st.pg = 0; render(); }, 450); };
   $("st-prev").onclick = () => { st.pg--; render(); }; $("st-next").onclick = () => { st.pg++; render(); };
   document.querySelectorAll("[data-sid]").forEach((tr) => tr.onclick = () => openStudent(tr.dataset.sid));
+  $("st-export").onclick = () => exportStudents(r, f, st);
+}
+// Export (Amit, 20 Nov 2026): every student in the chosen flag tab, dates, filters and search, as CSV (opens in Excel).
+// Built in the browser from rev_students_json, 200 students per call; nothing is stored or logged.
+const studentFlags = (x) => [x.n_pending ? "Balance pending" : "", x.n_over ? "Paid more" : "", x.n_noprice ? "No price" : "",
+  x.n_balonly ? "Balance only" : "", !x.n_pending && !x.n_over && !x.n_noprice && !x.n_balonly ? "Matches" : ""].filter(Boolean).join(", ");
+async function exportStudents(r, f, st) {
+  const b = $("st-export"); b.disabled = true; const label = b.textContent;
+  try {
+    const all = []; let total = Infinity;
+    for (let off = 0; off < total; off += 200) {
+      b.textContent = total === Infinity ? "Exporting…" : `Exporting ${num(Math.min(off, total))} / ${num(total)}…`;
+      const d = await rpcJson("rev_students_json", { p_from: r.from, p_to: r.to, ...f, p_flag: st.flag || null, p_search: st.q || null, p_offset: off, p_limit: 200 });
+      total = d.total || 0; all.push(...(d.rows || [])); if (!(d.rows || []).length) break;
+    }
+    const cell = (v) => { const t = v == null ? "" : String(v); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const txt = (v) => (v ? `="${String(v).replace(/"/g, "")}"` : "");   // keeps leading digits of phones as text in Excel
+    const head = ["Student ID", "Name", "Phone", "Alternate phones", "Email", "Alternate emails", "Courses (in these dates)", "Courses",
+      "Sales price", "Paid", "Balance (price - paid)", "Flags"];
+    const lines = all.map((x) => { const ph = x.phones || [], em = x.emails || [], price = Number(x.price) || 0, paid = Number(x.paid) || 0;
+      return [x.student_id, x.name || "", txt(ph[0]), ph.slice(1).join(" | "), em[0] || "", em.slice(1).join(" | "), x.courses || "", x.n_courses || 0,
+        price, paid, price - paid, studentFlags(x)].map((v, i) => (i === 2 ? v : cell(v))).join(","); });
+    const name = `student_dictionary_${(FLAGS[st.flag] || "All").toLowerCase().replace(/\s+/g, "_")}_${r.from}_to_${r.to}.csv`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["\ufeff" + [head.join(","), ...lines].join("\r\n")], { type: "text/csv;charset=utf-8" }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch (e) { alert(`Could not export: ${e.message || e}`); }
+  finally { b.disabled = false; b.textContent = label; }
 }
 // Total fees paid filled but Fee paid blank = a repeat line of the same payment (e.g. Bajaj loan): not counted (Amit, 18 Nov 2026)
 const skipRow = (p) => !Number(p.fee_paid) && Number(p.total_paid) > 0;
