@@ -228,13 +228,25 @@ tr.total td { font-weight: 700; border-top: 1px solid var(--line-2); color: var(
 .cpy:hover { color: var(--ink); border-color: var(--muted); }
 .cpy.ok { color: var(--good); border-color: var(--good); }
 
-/* Sales Intelligence Portal (Amit, 18 Nov 2026): a way back to the portal home, and who is signed in */
-.si-home { display: flex; align-items: center; gap: 9px; padding: 8px 12px; border-radius: 9px; border: 1px solid var(--line-2); color: var(--ink);
-  text-decoration: none; font: 600 13px Inter, system-ui, sans-serif; background: var(--gold-soft); }
-.si-home svg { width: 17px; height: 17px; fill: none; stroke: var(--gold); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.si-home:hover { border-color: var(--gold); }
 .si-me { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--panel-2); min-width: 0; }
 .si-av { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--gold); color: var(--on-gold); font: 700 14px Inter, sans-serif; }
 .si-t { display: grid; min-width: 0; line-height: 1.25; }
 .si-t b { font: 600 13.5px Inter, sans-serif; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .si-t small { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Home (Amit, 24 Nov 2026): one compact button at the top right of every dashboard, back to the Sales Intelligence Portal;
+   the hover card says where it goes */
+.si-home { position: relative; flex: none; display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 10px;
+  border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--ink); text-decoration: none;
+  font: 600 13px/1 Inter, system-ui, sans-serif; letter-spacing: .005em; white-space: nowrap; transition: border-color .15s, background-color .15s; }
+.si-home svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.si-home:hover { border-color: var(--gold); }
+.si-home:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.si-tip { position: absolute; top: calc(100% + 8px); right: 0; z-index: 80; width: max-content; max-width: 240px; padding: 9px 12px;
+  border-radius: 8px; background: #17181C; border: 1px solid rgba(255,255,255,.09); box-shadow: 0 12px 28px rgba(0,0,0,.28);
+  color: #B9BCC5; font: 400 12px/1.45 Inter, system-ui, sans-serif; text-align: left; white-space: normal;
+  opacity: 0; transform: translateY(-3px); pointer-events: none; transition: opacity .14s, transform .14s; }
+.si-tip b { display: block; margin-bottom: 2px; color: #FFFFFF; font: 700 12.5px/1.3 Manrope, Inter, sans-serif; }
+.si-home:hover .si-tip, .si-home:focus-visible .si-tip { opacity: 1; transform: none; transition-delay: .25s; }
+@media (max-width: 640px) { .si-home { padding: 0 9px; } .si-home-l { display: none; } }
+@media (prefers-reduced-motion: reduce) { .si-home, .si-tip { transition: none; } }
