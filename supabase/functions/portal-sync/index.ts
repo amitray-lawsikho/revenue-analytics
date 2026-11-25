@@ -1,7 +1,7 @@
 // portal-sync (Revenue project): the Sales Intelligence Portal's Data sync page (Amit, 25 Nov 2026) shows when Revenue Analytics
 // last updated and starts its Update data, without opening the dashboard. Same check as portal-open: the portal sign-in (a
 // Calling-project token) is checked with the Calling project, then the person's Revenue access is read from portal_me.
-// Body: { portal_token, action: "status" | "run" }. "run" = the dashboard's own Update data (request_refresh), started as them.
+// Body: { portal_token, action: "status" | "run" }. "run" = the dashboard's own Update data, for Revenue admins only (Amit, 25 Nov 2026).
 // verify_jwt = false: the token is a Calling one, checked below.
 const SB_URL = Deno.env.get('SUPABASE_URL')!;
 const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -35,6 +35,8 @@ Deno.serve(async (req) => {
     if (!email || !j?.access?.revenue) return out({ error: 'You do not have access to Revenue Analytics.' }, 403);
 
     if (action === 'run') {
+      // only Revenue admins update the data (Amit, 25 Nov 2026)
+      if (j.access.revenue.role !== 'admin') return out({ error: 'Only Revenue Analytics admins can update the data.' }, 403);
       const r = await rpc('portal_request_refresh', { p_email: email });
       return out({ result: r, status: await rpc('portal_refresh_status') });
     }

@@ -819,6 +819,8 @@ async function start() {
   if (!ok) { if (toPortal("revenue")) return; $("auth").hidden = false; $("app").hidden = true;
     $("auth-msg").textContent = `${session.user.email} has no access to this dashboard. Ask a portal admin to give it in the Sales Intelligence Portal.`; return; }
   $("auth").hidden = true; $("app").hidden = false; fillMe(session.user.email);
+  // Update data for this dashboard's admins only (Amit, 25 Nov 2026); viewers see when the data was updated
+  sb.rpc("rev_can_update").then(({ data }) => { $("update").hidden = !data; });
   // Student Dictionary shows student contacts: only emails listed in allowed_users see it
   const { data: canStudents } = await sb.rpc("can_see_students");
   document.querySelectorAll('[data-page="students"]').forEach((a) => { a.hidden = !canStudents; a.previousElementSibling?.classList.contains("nav-h") && (a.previousElementSibling.hidden = !canStudents); });
