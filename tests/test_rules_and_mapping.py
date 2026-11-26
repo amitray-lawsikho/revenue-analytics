@@ -250,3 +250,27 @@ def test_student_columns_found():
               "Enrollment of this Month", "", "Team", "Vertical", "Month", "SALES LEADER"]
     cols = find_columns(header, C.REVENUE_COLUMNS, ())
     assert (cols["cust_name"], cols["course"], cols["total_paid"], cols["fee_paid"], cols["course_price"]) == (3, 7, 8, 9, 20)
+
+
+def test_unchanged_rows_are_not_rewritten_and_prune_by_id():
+    """Amit, 26 Nov 2026: rows are written without load_id (an unchanged row is skipped by the database) and rows gone from
+    the reloaded sheets are deleted by id, one id prefix per call."""
+    from etl.refresh import without_load_id, prune
+    assert without_load_id([{"id": "a1", "load_id": "L1", "fee_paid": 5}]) == [{"id": "a1", "fee_paid": 5}]
+
+    class FakeStore:
+        def __init__(self):
+            self.calls = []
+
+        def rpc(self, fn, args=None, timeout=120):
+            self.calls.append((fn, args))
+            return 1 if args["p_keep"] else 0
+
+    st = FakeStore()
+    ids = ["0" + "a" * 39, "0" + "b" * 39, "f" + "c" * 39]
+    n = prune(st, "revenue_txn", ids, ["Combined"], None)
+    assert len(st.calls) == 16 and all(fn == "rev_prune" for fn, _ in st.calls)
+    by = {a["p_prefix"]: a for _, a in st.calls}
+    assert by["0"]["p_keep"] == ids[:2] and by["f"]["p_keep"] == ids[2:] and by["5"]["p_keep"] == []
+    assert all(a["p_sheets"] == ["Combined"] and a["p_table"] == "revenue_txn" for a in by.values())
+    assert n == 2

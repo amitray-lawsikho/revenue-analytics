@@ -185,6 +185,20 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
     return out
 
 
+def without_load_id(rows: list[dict]) -> list[dict]:
+    """The rows as written: no load_id, so an unchanged row is identical to the stored one and is not rewritten."""
+    return [{k: v for k, v in r.items() if k != "load_id"} for r in rows]
+
+
+def prune(store, table: str, keep_ids: list[str], sheets: list[str] | None, skip_sheets: list[str] | None) -> int:
+    """Delete the rows of the reloaded sheets (all sheets when None) that this run did not read, one id prefix at a time."""
+    by_prefix: dict[str, list[str]] = {c: [] for c in "0123456789abcdef"}
+    for i in keep_ids:
+        by_prefix[i[0]].append(i)
+    return sum(int(store.rpc("rev_prune", {"p_table": table, "p_prefix": p, "p_sheets": sheets, "p_skip_sheets": skip_sheets,
+                                           "p_keep": ids}) or 0) for p, ids in by_prefix.items())
+
+
 def bootcamp_rows(raw: list[dict], keep, load_id: str) -> list[dict]:
     """Bootcamp joining fees: one row per (date, brand, course, Enrollment) with the day's total, credited to
     "Bootcamp Joining - Direct". Revenue only (never a new enrolment). Individual payments are not stored."""
@@ -344,17 +358,18 @@ def main(argv: list[str] | None = None) -> int:
         # Write. Back-dated entries need nothing special: the whole Combined sheet is reloaded every run.
         store.upsert("roster", [{**r, "updated_at": datetime.now(timezone.utc).isoformat()} for r in roster], "email")
         store.delete("roster", f"updated_at=lt.{started}")
-        store.upsert("revenue_txn", rev, "id")
+        # Unchanged rows are never rewritten (Amit, 26 Nov 2026): load_id is not sent (the column defaults to the first load) and
+        # the database skips an update that changes nothing, so the free 500 MB database no longer carries a second copy.
+        store.upsert("revenue_txn", without_load_id(rev), "id")
         if full:
-            stale = f"load_id=neq.{load_id}" + ("" if boot_ok else f"&sheet=neq.{quote(C.BOOTCAMP_SHEET)}")
+            scope, skip = None, (None if boot_ok else [C.BOOTCAMP_SHEET])
         else:
-            boot_q = quote(f'"{C.BOOTCAMP_SHEET}"')  # in.() list item with a space must be quoted
-            sheets_reloaded = f"{C.COMBINED_TAB},{boot_q}" if boot_ok else C.COMBINED_TAB
-            stale = f"sheet=in.({sheets_reloaded})&load_id=neq.{load_id}"
-        store.delete("revenue_txn", stale)
+            scope, skip = [C.COMBINED_TAB] + ([C.BOOTCAMP_SHEET] if boot_ok else []), None
+        detail["pruned"] = prune(store, "revenue_txn", [r["id"] for r in rev], scope, skip)
         # Student Dictionary rows: same reload rule as revenue_txn (students are regrouped at the end of the run)
-        store.upsert("rev_student_txn", students, "txn_id")
-        store.delete("rev_student_txn", f"load_id=neq.{load_id}" if full else f"sheet=eq.{C.COMBINED_TAB}&load_id=neq.{load_id}")
+        store.upsert("rev_student_txn", without_load_id(students), "txn_id")
+        detail["pruned_students"] = prune(store, "rev_student_txn", [r["txn_id"] for r in students],
+                                          None if full else [C.COMBINED_TAB], None)
         # the dashboard reads this daily summary; quick runs rebuild only the current FY (the only part they changed)
         detail["summary_rows"] = store.rpc("rebuild_rev_daily_from", {"p_from": None if full else C.CURRENT_FY_START.isoformat()})
         store.upsert("calls_daily", calls, "call_date,email,dialler")

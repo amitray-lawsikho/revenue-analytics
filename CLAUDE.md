@@ -20,6 +20,10 @@ by day, week, month and financial year, compared with the same dates last year. 
   and balance rows are stored only in private tables `rev_student_txn` / `rev_student` / `rev_student_course` (RLS on, no policies), rebuilt by
   `rebuild_students()` after each run (the refresh calls `request_students_rebuild`; pg_cron `rev-students-rebuild` runs it in the database, result in `rev_bg_job`) and read only via `rev_students_json` / `rev_student_json` by people given Student Dictionary in the portal (`portal_grant.students`); its Export button (Amit, 20 Nov 2026) downloads the current flag tab, dates, filters and search as CSV in the browser. Never log, print or dump them.
 - Outside the Student Dictionary, phone and email are read only to make keyed one-way codes (`revenue_txn.cust_key` for IIT rows; `ph_key`/`em_key` for New enrollment ≥ ₹999, used by the Leads Console Realtime Tracker through `lc_rev_match`; Amit, 30 Oct 2026) and are never stored, logged or printed (the column list in `etl/config.py`; Amit, 30 Oct 2026).
+- Free plan, 500 MB (Amit, 26 Nov 2026: it reached 519 MB because every refresh rewrote every row): `revenue_txn` / `rev_student_txn`
+  are written without `load_id` (it defaults to the first load) and trigger `zz_skip_same` (suppress_redundant_updates_trigger) skips
+  an update that changes nothing; rows gone from the reloaded sheets are deleted by id with `rev_prune` (16 id prefixes). Never bring
+  back "delete where load_id <> this run". If the database nears 450 MB, `vacuum (full)` the big tables at a quiet time.
 - Keys only in env / GitHub secrets: BQ_CREDENTIALS, SUPABASE_URL, SUPABASE_SERVICE_KEY. Never print them. The customer-code key lives only in Supabase (`_rev_secret`, read via `_rev_hash_key`, service role).
 - Token economy: inspect headers + a few rows, aggregate in SQL; never dump whole sheets or tables into chat.
 - Run `python -m pytest -q` before every push; add a test with each rule change.
