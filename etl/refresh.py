@@ -102,18 +102,12 @@ def build_monthwise(rows: list[dict]) -> dict:
     return idx
 
 
-def monthwise_team(idx: dict, email: str | None, raw_name: str, d: date) -> tuple[str, str] | None:
-    """(team, vertical) for a payment on `d`: that month's MonthwiseTeamList row (email first, then name); if the
-    caller isn't listed that month, the nearest listed month (the earlier one on a tie); None if never listed."""
-    m = d.replace(day=1)
-    months = [idx["email"].get((email or "").lower()) or {}, idx["name"].get(norm_name(raw_name)) or {}]
-    for by_month in months:
-        if m in by_month:
-            return by_month[m]
-    for by_month in months:
+def latest_team(idx: dict, email: str | None, raw_name: str) -> tuple[str, str] | None:
+    """(team, vertical) of the latest month the caller is listed in MonthwiseTeamList (email first, then name); None if
+    never listed. Latest team for all history (Amit, 28 Nov 2026), so a caller is never split over old team names."""
+    for by_month in (idx["email"].get((email or "").lower()) or {}, idx["name"].get(norm_name(raw_name)) or {}):
         if by_month:
-            best = min(by_month, key=lambda k: (abs((k.year - m.year) * 12 + k.month - m.month), k))
-            return by_month[best]
+            return by_month[max(by_month)]
     return None
 
 
@@ -130,7 +124,7 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
                  load_id: str, unmapped: dict, secret: bytes | None = None, monthwise: dict | None = None,
                  students: list | None = None) -> list[dict]:
     """Every payment row whose date `keep(d)` accepts, credited by `attribute`. Rows without a readable date are skipped.
-    From C.MONTHWISE_START, a current or resigned caller takes the team/vertical of that month's MonthwiseTeamList.
+    Current callers keep today's Teamlist team/vertical; resigned callers take the latest MonthwiseTeamList one (all history).
     `students` (Student Dictionary) collects name / phone / email / Total fees paid / Course Price of New enrollment and
     balance-payment rows, for the private table rev_student_txn."""
     out = []
@@ -141,8 +135,10 @@ def revenue_rows(raw: list[dict], sheet: str, keep, name_to_email: dict[str, str
         raw_name = (r.get("caller") or "").strip()
         fee = parse_amount(r.get("fee_paid"))
         a = attribute(raw_name, r.get("team", ""), r.get("vertical", ""), name_to_email, roster_by_email)
-        if monthwise and d >= C.MONTHWISE_START and a["caller_status"] in ("current", "resigned"):
-            tv = monthwise_team(monthwise, a["email"], raw_name, d)
+        # one team per caller for all history (Amit, 28 Nov 2026): current callers keep today's Teamlist team (the
+        # latest MonthwiseTeamList one only if Teamlist has none); resigned callers take their latest MonthwiseTeamList team
+        if monthwise and (a["caller_status"] == "resigned" or (a["caller_status"] == "current" and NOT_ASSIGNED in (a["team"], a["vertical"]))):
+            tv = latest_team(monthwise, a["email"], raw_name)
             if tv:
                 a["team"], a["vertical"] = tv
         if a["caller_status"] == "resigned":

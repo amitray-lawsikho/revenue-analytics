@@ -7,10 +7,9 @@ from datetime import date
 TEAM_SHEET_ID = os.environ.get("TEAM_SHEET_ID", "1OHn0KIS01NzmOiEID12j11G4ZhzeCiSe1X5KKNpLXns")
 TEAM_TAB = "Teamlist"
 
-# Teams by month (Amit, 12 Nov 2026): from MONTHWISE_START a payment takes the caller's team/vertical from this tab for the
-# payment's month (column "Month" = first date of the month); earlier payments keep the current Teamlist.
+# Latest team for all history (Amit, 28 Nov 2026; replaces the 12 Nov team-by-month rule): a resigned caller takes the team/vertical
+# of the latest month listed in this tab (column "Month" = first date of the month); current callers keep today's Teamlist.
 MONTHWISE_TAB = "MonthwiseTeamList"
-MONTHWISE_START = date(2025, 1, 1)
 MONTHWISE_COLUMNS = {
     "email": ("email id",),
     "name": ("caller name",),
