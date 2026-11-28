@@ -12,7 +12,8 @@ const PAGES = {
 const LEVELS = { vertical: "Vertical", team: "Team", caller: "Caller" };
 const MODES = { all: "Revenue (Fee paid)", calling: "Calling revenue", collection: "Collection revenue", other: "Other revenue", iit: "IIT revenue" };
 const COLLECTION_VERTICAL = /mayur|anmol/i;   // collection teams (Team Mayur, Team Anmol)
-const STATUS = { current: "Current", resigned: "Resigned", direct: "Direct", "no caller": "No caller details" };
+const STATUS = { current: "",   // not written anywhere (Amit, 28 Nov 2026)
+  resigned: "Resigned", direct: "Direct", "no caller": "No caller details" };
 const GRAINS = { day: "Day", part: "Part of month", month: "Month", fy: "Financial year" };
 const S = { page: "overall", dims: [], charts: {}, sort: { k: "revenue", dir: -1 }, pivotMetric: "revenue", seq: 0, cgrain: "month", dgrain: "month", iitLevel: "team",
   sel: { vertical: new Set(), team: new Set(), caller: new Set() } };
@@ -371,7 +372,7 @@ async function renderLevel(r, seq, page) {
 
   const cols = [{ h: "#", f: (x) => (x._total ? "" : x._i + 1) }];
   if (isCaller) cols.push({ h: "Caller", k: "caller", l: 1 },
-    { h: "Type", l: 1, f: (x) => x._total ? "" : `<span class="badge ${x.status === "no caller" ? "" : esc(x.status)}">${esc(STATUS[x.status] || x.status)}</span>` });
+    { h: "Type", l: 1, f: (x) => x._total ? "" : badgeOf(x.status) });
   if (lvl !== "vertical") cols.push({ h: "Team", k: "team", l: 1 });
   cols.push({ h: "Vertical", k: "vertical", l: 1 },
     { h: isIit ? "IIT revenue" : m === "all" ? "Revenue" : MODES[m], k: "revenue", f: (x) => money(x.revenue) },
@@ -456,7 +457,7 @@ async function renderLevel(r, seq, page) {
 
   chart("ch-rank", {
     type: "bar",
-    data: { labels: top.map((x) => lvl === "team" ? [x.team, x.vertical] : isCaller ? [x.caller, `${x.team} · ${STATUS[x.status] || ""}`] : x.vertical),
+    data: { labels: top.map((x) => lvl === "team" ? [x.team, x.vertical] : isCaller ? [x.caller, [x.team, STATUS[x.status]].filter(Boolean).join(" · ")] : x.vertical),
       datasets: [
         { label: "Selected dates", data: top.map((x) => x.revenue), backgroundColor: css("--gold"), borderRadius: 3, barPercentage: .9, categoryPercentage: .78 },
         ...(r.cmp ? [{ label: r.cmp[0].toUpperCase() + r.cmp.slice(1), data: top.map((x) => x.ly_revenue), backgroundColor: css("--ly"), borderRadius: 3, barPercentage: .9, categoryPercentage: .78 }] : []),
@@ -519,7 +520,7 @@ async function openDetail(x, lvl) {
   const name = lvl === "vertical" ? x.vertical : lvl === "team" ? x.team : x.caller;
   $("d-kind").textContent = `${LEVELS[lvl]}${m === "all" ? "" : " · " + MODES[m]}`;
   $("d-name").textContent = name;
-  const where = lvl === "caller" ? `${esc(STATUS[x.status] || x.status)} · ${esc(x.team)} · ${esc(x.vertical)}<br>` : lvl === "team" ? `${esc(x.vertical)}<br>` : "";
+  const where = lvl === "caller" ? `${[STATUS[x.status] ?? x.status, x.team, x.vertical].filter(Boolean).map(esc).join(" · ")}<br>` : lvl === "team" ? `${esc(x.vertical)}<br>` : "";
   $("d-sub").innerHTML = `${where}${nice(r.from)} – ${nice(r.to)}${r.cmp ? `, compared with ${nice(r.pf)} – ${nice(r.pt)} (${esc(r.cmp)})` : ""}${tg !== S.dgrain ? " · shown by month (more than 62 days)" : ""}`;
   const ly = r.cmp || "";
   $("d-kpis").innerHTML = kpi(MODES[m], money(x.revenue), x.revenue, x.ly_revenue, ly) +
@@ -550,7 +551,7 @@ async function openDetail(x, lvl) {
   $("d-courses").innerHTML = cs.error ? `<tr><td>${esc(cs.error.message || cs.error)}</td></tr>` : courseTable(cs).replace(/^<table>|<\/table>$/g, "");
   if (kid) {
     const kids = joinLy(kc, kl, kid); kids.forEach((k2, i) => (k2._i = i)); S.dkids = kids;
-    const cols = [{ h: LEVELS[kid], l: 1, f: (k2) => esc(kid === "team" ? k2.team : k2.caller) + (kid === "caller" ? ` <span class="badge ${k2.status === "no caller" ? "" : esc(k2.status)}">${esc(STATUS[k2.status] || k2.status)}</span>` : "") },
+    const cols = [{ h: LEVELS[kid], l: 1, f: (k2) => esc(kid === "team" ? k2.team : k2.caller) + (kid === "caller" ? ` ${badgeOf(k2.status)}` : "") },
       { h: "Revenue", f: (k2) => money(k2.revenue) }, { h: m === "iit" ? "Sold" : "New enr.", f: (k2) => num(k2.enrolments) },
       ...(r.cmp ? [{ h: r.cmpShort[0].toUpperCase() + r.cmpShort.slice(1), f: (k2) => money(k2.ly_revenue) }, { h: "Change", f: (k2) => chHtml(k2.change) }] : [])];
     $("d-kids").innerHTML = table(cols, kids, { click: true });
@@ -599,10 +600,17 @@ function msInit(id) {
   msButton(id);
 }
 document.addEventListener("click", (e) => { if (!e.target.closest(".ms")) document.querySelectorAll(".ms-pop").forEach((p) => (p.hidden = true)); });
+// Team / Vertical pickers list today's names (Teamlist, plus the Direct / Bootcamp Joining / Not assigned buckets); older names
+// only with "Show older names" ticked (Amit, 28 Nov 2026). A name already chosen stays listed.
+function isRecent(kind, d) {
+  const R = S.recent; if (!R || $("f-older").checked) return true;
+  if (R.buckets.has(d.vertical)) return true;
+  return kind === "vertical" ? R.verticals.has(d.vertical) : R.teams.has(d.team);
+}
 function buildOptions() {
   const V = S.sel.vertical, T = S.sel.team, st = $("f-status").value;
-  MS.vertical.opts = [...new Set(S.dims.map((d) => d.vertical))].filter(Boolean).sort().map((v) => ({ value: v }));
-  MS.team.opts = [...new Map(S.dims.filter((d) => d.team && (!V.size || V.has(d.vertical))).map((d) => [d.team, d.vertical]))]
+  MS.vertical.opts = [...new Set(S.dims.filter((d) => isRecent("vertical", d) || V.has(d.vertical)).map((d) => d.vertical))].filter(Boolean).sort().map((v) => ({ value: v }));
+  MS.team.opts = [...new Map(S.dims.filter((d) => d.team && (!V.size || V.has(d.vertical)) && (isRecent("team", d) || T.has(d.team))).map((d) => [d.team, d.vertical]))]
     .sort((a, b) => a[0].localeCompare(b[0])).map(([t, v]) => ({ value: t, sub: v }));
   const cm = new Map();
   for (const d of S.dims) {
@@ -611,7 +619,7 @@ function buildOptions() {
     o.n++; if ((d.last_date || "") > o.last) { o.last = d.last_date; o.team = d.team; o.status = d.caller_status; } cm.set(d.caller, o);
   }
   MS.caller.opts = [...cm.values()].sort((a, b) => a.value.localeCompare(b.value))
-    .map((o) => ({ value: o.value, sub: `${STATUS[o.status] || o.status} · ${o.team}${o.n > 1 ? ` +${o.n - 1}` : ""}${o.last ? ` · last ${short(o.last)}` : ""}` }));
+    .map((o) => ({ value: o.value, sub: `${STATUS[o.status] ? STATUS[o.status] + " · " : ""}${o.team}${o.n > 1 ? ` +${o.n - 1}` : ""}${o.last ? ` · last ${short(o.last)}` : ""}` }));
   for (const id of Object.keys(MS)) { msButton(id); const box = $(`ms-${id}`); if (box && !box.querySelector(".ms-pop").hidden) msList(id); }
 }
 
@@ -737,9 +745,12 @@ function fillFy() {
   const cur = +fyStart(istToday()).slice(0, 4);
   for (let y = cur; y >= 2023; y--) $("fy").insertAdjacentHTML("beforeend", `<option value="${y}">FY ${y}-${String(y + 1).slice(2)}</option>`);
 }
+function badgeOf(st) {
+  const l = STATUS[st] ?? st; return l ? `<span class="badge ${st === "no caller" ? "" : esc(st)}">${esc(l)}</span>` : "";
+}
 function clearFilters() {
   Object.values(S.sel).forEach((set) => set.clear());
-  $("f-status").value = ""; $("f-rtype").value = "all"; $("drawer").hidden = true; $("sdrawer").hidden = true;
+  $("f-status").value = ""; $("f-rtype").value = "all"; $("f-older").checked = false; $("drawer").hidden = true; $("sdrawer").hidden = true;
   S.st = { flag: "", q: "", pg: 0, size: 50 };
   buildOptions(); setPreset("month");
 }
@@ -794,7 +805,14 @@ $("theme").addEventListener("click", () => {
 });
 
 /* ---------- auth + start ---------- */
-async function loadDims() { try { S.dims = await rpcJson("rev_dims_json", {}); buildOptions(); } catch (_) {} }
+async function loadDims() {
+  try {
+    const [dims, rec] = await Promise.all([rpcJson("rev_dims_json", {}), rpcJson("rev_recent_json", {}).catch(() => null)]);
+    S.dims = dims;
+    S.recent = rec ? { teams: new Set(rec.teams), verticals: new Set(rec.verticals), buckets: new Set(rec.buckets) } : null;
+    buildOptions();
+  } catch (_) {}
+}
 // Sales Intelligence Portal (Amit, 18 Nov 2026): this dashboard has no sign-in of its own. Without a session (or without access)
 // it goes to the portal, which checks the sign-in and access and comes back with a one-time sign-in link.
 const PORTAL = "https://sales-intelligence-portal.amitray.workers.dev/";
@@ -843,6 +861,7 @@ $("f-status").addEventListener("change", () => { buildOptions(); render(); });
 $("f-rtype").addEventListener("change", () => { $("drawer").hidden = true; render(); });
 $("update").addEventListener("click", update);
 $("clear-filters").addEventListener("click", clearFilters);
+$("f-older").addEventListener("change", buildOptions);
 $("d-close").addEventListener("click", () => { $("drawer").hidden = true; });
 $("s-close").addEventListener("click", () => { $("sdrawer").hidden = true; });
 $("sdrawer").addEventListener("click", async (e) => {   // copy a phone / email to the clipboard

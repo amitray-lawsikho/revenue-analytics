@@ -107,8 +107,13 @@ input:focus, select:focus { border-color: var(--gold); box-shadow: 0 0 0 3px var
 .filters { display: grid; gap: 14px; }
 .filter-row { display: flex; flex-wrap: wrap; gap: 12px; }
 .filter-row label, .filter-row .lbl { flex: 1 1 160px; }
-.lbl { display: grid; gap: 6px; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; min-width: 0; }
-.ms { position: relative; }
+.lbl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; min-width: 0; }
+.ms { position: relative; min-width: 0; }
+.filter-row label, .filter-row .lbl { min-width: 0; }
+.filter-row label > select, .filter-row label > input { max-width: 100%; }
+.filters-acts { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.older { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.older input { width: auto; margin: 0; accent-color: var(--gold); }
 .ms-btn { width: 100%; text-align: left; font: 500 13.5px Inter, sans-serif; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 8px; padding: 10px 30px 10px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; }
 .ms-btn::after { content: "▾"; position: absolute; right: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); }
@@ -210,7 +215,7 @@ tr.total td { font-weight: 700; border-top: 1px solid var(--line-2); color: var(
 .section-h { margin: 22px 0 10px; font: 600 13px Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--gold-2); }
 .page-tabs { margin-bottom: 14px; }
 .filters-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.filters-top #clear-filters { margin-left: auto; }
+.filters-top .filters-acts { margin-left: auto; }
 .monogram { font: 700 20px Inter, system-ui, sans-serif; letter-spacing: 0; line-height: 1; }
 .monogram.lg { font-size: 32px; }
 
